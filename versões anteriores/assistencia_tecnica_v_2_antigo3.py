@@ -37,7 +37,7 @@ def inicializar_banco():
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO usuarios (nome, login, senha, permissao) VALUES (?, ?, ?, ?)",
-                  ("Administrador", "admin", "4845@4845Aa", "admin"))
+                  ("Administrador", "admin", "admin", "admin"))
     conn.commit()
     conn.close()
 
@@ -118,17 +118,6 @@ def nova_os():
         flash(f"OS {codigo_os} criada com sucesso!")
         return redirect(url_for('nova_os'))
     return render_template('nova_os.html', usuario=session['usuario'])
-
-@app.route('/listar_os')
-def listar_os():
-    if 'usuario' not in session:
-        return redirect(url_for('login'))
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    c.execute("SELECT * FROM ordens_servico ORDER BY id DESC")
-    ordens = c.fetchall()
-    conn.close()
-    return render_template('listar_os.html', ordens=ordens, usuario=session['usuario'])
 
 if __name__ == '__main__':
     inicializar_banco()

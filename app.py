@@ -37,7 +37,7 @@ def inicializar_banco():
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO usuarios (nome, login, senha, permissao) VALUES (?, ?, ?, ?)",
-                  ("Administrador", "admin", "4845@4845Aa", "admin"))
+                  ("Administrador", "admin", "admin", "admin"))
     conn.commit()
     conn.close()
 

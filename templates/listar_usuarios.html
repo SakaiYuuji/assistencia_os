@@ -1,0 +1,12 @@
+<tbody>
+    {% for usuario in usuarios %}
+    <tr>
+        <td>{{ usuario.nome }}</td>
+        <td>{{ usuario.login }}</td>
+        <td>{{ usuario.permissao }}</td>
+        <td>
+            <a href="{{ url_for('editar_usuario', usuario_id=usuario.id) }}" class="btn btn-sm btn-info">Editar</a>
+            </td>
+    </tr>
+    {% endfor %}
+</tbody>

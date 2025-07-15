@@ -393,6 +393,88 @@ def cadastrar_usuario():
             conn.close()
     return render_template('cadastrar_usuario.html')
 
+@app.route('/editar_usuario/<int:usuario_id>', methods=['GET', 'POST'])
+def editar_usuario(usuario_id):
+    # Verifica se o usuário logado tem permissão para editar (ex: 'admin')
+    if 'usuario_id' not in session or session.get('permissao') != 'admin':
+        flash('Acesso negado. Você não tem permissão para editar usuários.', 'danger')
+        return redirect(url_for('dashboard')) # Ou para a página de login
+
+    conn = None
+    try:
+        conn = sqlite3.connect('seu_banco_de_dados.db') # Use o nome correto do seu DB
+        cursor = conn.cursor()
+
+        if request.method == 'POST':
+            # Processa os dados do formulário de edição
+            nome = request.form['nome']
+            login = request.form['login']
+            permissao = request.form['permissao']
+            senha_nova = request.form.get('senha_nova') # Senha é opcional na edição
+
+            # Verifica se o novo login já existe para outro usuário
+            cursor.execute("SELECT id FROM usuarios WHERE login = ? AND id != ?", (login, usuario_id))
+            if cursor.fetchone():
+                flash('Erro: O login informado já está em uso por outro usuário.', 'danger')
+                # Busca o usuário novamente para preencher o formulário com os dados atuais
+                cursor.execute("SELECT id, nome, login, permissao FROM usuarios WHERE id = ?", (usuario_id,))
+                usuario = cursor.fetchone()
+                return render_template('editar_usuario.html', usuario=usuario)
+
+            # Atualiza os dados do usuário
+            if senha_nova:
+                hashed_password = generate_password_hash(senha_nova, method='pbkdf2:sha256')
+                cursor.execute("UPDATE usuarios SET nome = ?, login = ?, senha = ?, permissao = ? WHERE id = ?",
+                               (nome, login, hashed_password, permissao, usuario_id))
+            else:
+                cursor.execute("UPDATE usuarios SET nome = ?, login = ?, permissao = ? WHERE id = ?",
+                               (nome, login, permissao, usuario_id))
+            conn.commit()
+            flash('Usuário atualizado com sucesso!', 'success')
+            return redirect(url_for('listar_usuarios')) # Redireciona para uma lista de usuários
+
+        else: # Método GET: Exibe o formulário com os dados atuais
+            cursor.execute("SELECT id, nome, login, permissao FROM usuarios WHERE id = ?", (usuario_id,))
+            usuario = cursor.fetchone() # Retorna uma tupla ou None
+
+            if usuario:
+                # Converte a tupla para um dicionário para facilitar o acesso no template
+                usuario_dict = {
+                    'id': usuario[0],
+                    'nome': usuario[1],
+                    'login': usuario[2],
+                    'permissao': usuario[3]
+                }
+                return render_template('editar_usuario.html', usuario=usuario_dict)
+            else:
+                flash('Usuário não encontrado.', 'danger')
+                return redirect(url_for('listar_usuarios')) # Ou para o dashboard
+
+    except sqlite3.Error as e:
+        if conn: conn.rollback()
+        flash(f'Ocorreu um erro no banco de dados: {e}', 'danger')
+    except Exception as e:
+        if conn: conn.rollback()
+        flash(f'Ocorreu um erro inesperado: {e}', 'danger')
+    finally:
+        if conn: conn.close()
+    
+    return redirect(url_for('dashboard')) # Em caso de erro grave, redireciona
+
+# Você também precisará de uma rota para listar usuários, se ainda não tiver
+@app.route('/listar_usuarios')
+def listar_usuarios():
+    if 'usuario_id' not in session or session.get('permissao') != 'admin':
+        flash('Acesso negado.', 'danger')
+        return redirect(url_for('dashboard'))
+    
+    conn = sqlite3.connect('seu_banco_de_dados.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, nome, login, permissao FROM usuarios")
+    usuarios = cursor.fetchall()
+    conn.close()
+    return render_template('listar_usuarios.html', usuarios=usuarios)
+
 # --- NOVO: Rotas de Gerenciamento de Clientes (para Admin/Atendente) ---
 @app.route('/cadastrar_cliente', methods=['GET', 'POST'])
 def cadastrar_cliente():
@@ -525,7 +607,75 @@ def editar_cliente(id):
                                cliente=cliente_info, 
                                cliente_web_login=cliente_web_info[0] if cliente_web_info else None,
                                permissao=session['permissao']) # Passa permissao para o template
+@app.route('/alterar_senha_cliente', methods=['GET', 'POST'])
+def alterar_senha_cliente():
+    # Verifica se o usuário está logado e se é um 'cliente' (ou qualquer permissão que você defina para clientes)
+    if 'usuario_id' not in session:
+        flash('Você precisa estar logado para alterar sua senha.', 'danger')
+        return redirect(url_for('login'))
+    
+    # Opcional: Se você quiser que apenas clientes com a permissão 'cliente' possam usar esta rota
+    # if session.get('permissao') != 'cliente':
+    #     flash('Acesso negado. Esta função é apenas para clientes.', 'danger')
+    #     return redirect(url_for('dashboard'))
 
+    conn = None
+    try:
+        conn = sqlite3.connect('seu_banco_de_dados.db') # Use o nome correto do seu DB
+        cursor = conn.cursor()
+
+        if request.method == 'POST':
+            senha_atual = request.form['senha_atual']
+            nova_senha = request.form['nova_senha']
+            confirmar_nova_senha = request.form['confirmar_nova_senha']
+
+            # 1. Buscar a senha hashed do usuário logado no DB
+            cursor.execute("SELECT senha FROM usuarios WHERE id = ?", (session['usuario_id'],))
+            usuario_db = cursor.fetchone()
+
+            if not usuario_db:
+                flash('Erro: Usuário não encontrado.', 'danger')
+                return redirect(url_for('logout')) # Algo deu errado com a sessão
+            
+            senha_hashed_db = usuario_db[0]
+
+            # 2. Verificar se a senha atual digitada corresponde à senha no DB
+            if not check_password_hash(senha_hashed_db, senha_atual):
+                flash('Senha atual incorreta.', 'danger')
+                return render_template('alterar_senha_cliente.html')
+
+            # 3. Verificar se a nova senha e a confirmação são iguais
+            if nova_senha != confirmar_nova_senha:
+                flash('A nova senha e a confirmação não coincidem.', 'danger')
+                return render_template('alterar_senha_cliente.html')
+            
+            # 4. Verificar se a nova senha é diferente da antiga (opcional, mas boa prática)
+            if check_password_hash(senha_hashed_db, nova_senha):
+                flash('A nova senha não pode ser igual à senha atual.', 'warning')
+                return render_template('alterar_senha_cliente.html')
+
+            # 5. Gerar hash da nova senha e atualizar no DB
+            hashed_nova_senha = generate_password_hash(nova_senha, method='pbkdf2:sha256')
+            cursor.execute("UPDATE usuarios SET senha = ? WHERE id = ?",
+                           (hashed_nova_senha, session['usuario_id']))
+            conn.commit()
+            flash('Sua senha foi alterada com sucesso!', 'success')
+            return redirect(url_for('dashboard')) # Redireciona para o dashboard após a alteração
+
+        else: # Método GET: Exibe o formulário
+            return render_template('alterar_senha_cliente.html')
+
+    except sqlite3.Error as e:
+        if conn: conn.rollback()
+        flash(f'Ocorreu um erro no banco de dados: {e}', 'danger')
+    except Exception as e:
+        if conn: conn.rollback()
+        flash(f'Ocorreu um erro inesperado: {e}', 'danger')
+    finally:
+        if conn: conn.close()
+    
+    return redirect(url_for('dashboard')) # Em caso de erro grave, redireciona
+    
 # --- FIM DO NOVO: Rotas de Gerenciamento de Clientes ---
 
 @app.route('/nova_os', methods=['GET', 'POST'])

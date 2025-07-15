@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Editar Cliente</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="{{ url_for('dashboard') }}">Sistema OS</a>
+    <div class="d-flex">
+      <span class="navbar-text text-white me-3">Usuário: {{ session['usuario_nome'] }}</span>
+      <a href="{{ url_for('listar_clientes') }}" class="btn btn-outline-light btn-sm me-2">Voltar para Clientes</a>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm me-2">Voltar ao Painel</a>
+      <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-5">
+  <h3>Editar Cliente: {{ cliente[1] }}</h3>
+  <form method="POST" class="mt-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} mt-2">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="mb-3">
+      <label for="nome" class="form-label">Nome Completo (*)</label>
+      <input type="text" class="form-control" id="nome" name="nome" value="{{ cliente[1] }}" required>
+    </div>
+    <div class="mb-3">
+      <label for="cpf" class="form-label">CPF (*)</label>
+      <input type="text" class="form-control" id="cpf" name="cpf" value="{{ cliente[2] }}" required pattern="\d{3}\.?\d{3}\.?\d{3}-?\d{2}" title="Formato: 123.456.789-00">
+    </div>
+    <div class="mb-3">
+      <label for="telefone" class="form-label">Telefone</label>
+      <input type="text" class="form-control" id="telefone" name="telefone" value="{{ cliente[3] or '' }}">
+    </div>
+
+    <hr class="my-4">
+
+    <h4>Acesso Web do Cliente</h4>
+
+    {% if cliente_web_login %}
+      <div class="alert alert-info">
+        Este cliente já possui acesso web com o login: <strong>{{ cliente_web_login }}</strong>.
+        Para alterar a senha, um recurso futuro seria necessário.
+      </div>
+      <button type="submit" class="btn btn-primary">Atualizar Dados do Cliente</button>
+    {% else %}
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" id="criar_acesso_web" name="criar_acesso_web">
+        <label class="form-check-label" for="criar_acesso_web">
+          Criar Acesso Web para este Cliente
+        </label>
+      </div>
+
+      <div id="campos_acesso_web" style="display: none;">
+        <div class="mb-3">
+          <label for="login_web" class="form-label">Login para Acesso Web (*)</label>
+          <input type="text" class="form-control" id="login_web" name="login_web">
+          <small class="form-text text-muted">O login será usado pelo cliente para acessar o sistema.</small>
+        </div>
+        <div class="mb-3">
+          <label for="senha_web" class="form-label">Senha para Acesso Web (*)</label>
+          <input type="password" class="form-control" id="senha_web" name="senha_web">
+          <small class="form-text text-muted">Forneça esta senha ao cliente.</small>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+    {% endif %}
+
+  </form>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    const checkbox = document.getElementById('criar_acesso_web');
+    const camposAcessoWeb = document.getElementById('campos_acesso_web');
+
+    if (checkbox) { // Garante que o checkbox existe (não existe se o cliente já tem acesso web)
+      checkbox.addEventListener('change', function() {
+        if (checkbox.checked) {
+          camposAcessoWeb.style.display = 'block';
+          // Se criar, torna campos de login/senha obrigatórios
+          document.getElementById('login_web').setAttribute('required', 'required');
+          document.getElementById('senha_web').setAttribute('required', 'required');
+        } else {
+          camposAcessoWeb.style.display = 'none';
+          // Remove a obrigatoriedade se desmarcar
+          document.getElementById('login_web').removeAttribute('required');
+          document.getElementById('senha_web').removeAttribute('required');
+        }
+      });
+    }
+  });
+</script>
+</body>
+</html>

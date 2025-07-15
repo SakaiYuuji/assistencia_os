@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Meu Painel - Cliente</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <span class="navbar-brand">Sistema OS - Cliente</span>
+    <div class="d-flex">
+      <span class="navbar-text text-white me-3">
+        Bem-vindo, {{ usuario }}!
+      </span>
+      <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-5">
+  <h2 class="mb-4">Minhas Ordens de Serviço</h2>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-2">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <table class="table table-striped table-hover">
+    <thead>
+      <tr>
+        <th>OS</th>
+        <th>Equipamento</th>
+        <th>Status</th>
+        <th>Data Entrada</th>
+        <th>Valor Orçado</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for os in ordens %}
+      <tr>
+        <td>{{ os[1] }}</td> {# codigo_os #}
+        <td>{{ os[4] }}</td> {# equipamento #}
+        <td>
+          {% if os[9] == 'Aberta' %}
+            <span class="badge bg-danger">{{ os[9] }}</span>
+          {% elif os[9] == 'Em Análise' %}
+            <span class="badge bg-warning text-dark">{{ os[9] }}</span>
+          {% elif os[9] == 'Finalizada' %}
+            <span class="badge bg-success">{{ os[9] }}</span>
+          {% else %}
+            <span class="badge bg-secondary">{{ os[9] }}</span>
+          {% endif %}
+        </td> {# status #}
+        <td>{{ os[10] }}</td> {# data_entrada #}
+        <td>R$ {{ "%.2f"|format(os[12] or 0.0) }}</td> {# valor_orcamento #}
+        <td>
+          {# Cliente pode ver a OS detalhada e aprovar se for o caso #}
+          <a href="{{ url_for('visualizar_os_publica', codigo_os=os[1]) }}" class="btn btn-sm btn-info" target="_blank">Ver Detalhes</a>
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not ordens %}
+      <tr>
+        <td colspan="6" class="text-center">Você não possui Ordens de Serviço cadastradas ou vinculadas ao seu acesso.</td>
+      </tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

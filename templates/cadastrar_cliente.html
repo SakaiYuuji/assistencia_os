@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Cadastrar Cliente</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="{{ url_for('dashboard') }}">Sistema OS</a>
+    <div class="d-flex">
+      <span class="navbar-text text-white me-3">Usuário: {{ session['usuario_nome'] }}</span>
+      <a href="{{ url_for('listar_clientes') }}" class="btn btn-outline-light btn-sm me-2">Voltar para Clientes</a>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm me-2">Voltar ao Painel</a>
+      <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-5">
+  <h3>Cadastrar Novo Cliente</h3>
+  <form method="POST" class="mt-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert alert-{{ category }} mt-2">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="mb-3">
+      <label for="nome" class="form-label">Nome Completo (*)</label>
+      <input type="text" class="form-control" id="nome" name="nome" required>
+    </div>
+    <div class="mb-3">
+      <label for="cpf" class="form-label">CPF (*)</label>
+      <input type="text" class="form-control" id="cpf" name="cpf" required pattern="\d{3}\.?\d{3}\.?\d{3}-?\d{2}" title="Formato: 123.456.789-00">
+      <small class="form-text text-muted">Apenas números ou formato 000.000.000-00</small>
+    </div>
+    <div class="mb-3">
+      <label for="telefone" class="form-label">Telefone</label>
+      <input type="text" class="form-control" id="telefone" name="telefone" placeholder="(DD) 9XXXX-XXXX ou (DD) XXXX-XXXX">
+    </div>
+    <button type="submit" class="btn btn-primary">Cadastrar Cliente</button>
+  </form>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

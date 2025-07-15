@@ -1,13 +1,11 @@
-# Extensao do sistema com gestao de usuarios, permissoes, e dashboard com layout profissional
-
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
-import sqlite3, os
+import sqlite3
+import os
 from datetime import datetime
-from fpdf import FPDF # Certifique-se de que fpdf está instalado (pip install fpdf)
+from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
+from fpdf import FPDF
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-# MUDE ESTA CHAVE PARA UMA STRING LONGA, ALEATÓRIA E SEGURA EM PRODUÇÃO!
 app.secret_key = 'aB3c#D5e@F7g$H9i!J1k%L2m^N4o&P6q*R8s+T0u=VwXyZ'
 DB = 'assistencia.db'
 PDF_DIR = 'pdfs'
@@ -17,37 +15,93 @@ os.makedirs(PDF_DIR, exist_ok=True)
 def inicializar_banco():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
+    
+    # Tabela de Usuários Internos (admin, tecnico, atendente)
     c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         nome TEXT NOT NULL,
         login TEXT UNIQUE NOT NULL,
         senha TEXT NOT NULL,
-        permissao TEXT DEFAULT 'admin'
+        permissao TEXT DEFAULT 'admin' -- 'admin', 'tecnico', 'atendente'
     )''')
-    c.execute('''CREATE TABLE IF NOT EXISTS ordens_servico (
+
+    # NOVO: Tabela de Clientes (dados gerais do cliente)
+    c.execute('''CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        codigo_os TEXT,
-        cliente TEXT,
-        telefone TEXT,
-        equipamento TEXT,
-        numero_serie TEXT,
-        itens_internos TEXT,
-        defeito TEXT,
-        solucao TEXT,
-        status TEXT DEFAULT 'Aberta',
-        data_entrada TEXT,
-        responsavel TEXT
+        nome TEXT NOT NULL,
+        cpf TEXT UNIQUE NOT NULL, -- CPF como identificador único para o cliente
+        telefone TEXT
     )''')
+
+    # NOVO: Tabela de Acessos Web para Clientes (login do cliente externo)
+    c.execute('''CREATE TABLE IF NOT EXISTS clientes_web (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_cliente INTEGER NOT NULL,
+        login TEXT UNIQUE NOT NULL,
+        senha TEXT NOT NULL,
+        FOREIGN KEY (id_cliente) REFERENCES clientes(id)
+    )''')
+
+    # Tabela de Ordens de Serviço (com FK para clientes)
+    # Garante que a tabela é criada com todos os campos ou adiciona se já existir
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS ordens_servico (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            codigo_os TEXT,
+            id_cliente INTEGER, -- NOVO CAMPO: Chave estrangeira para a tabela 'clientes'
+            cliente TEXT,       -- Mantido temporariamente para compatibilidade, será preenchido via id_cliente
+            telefone TEXT,      -- Mantido temporariamente para compatibilidade, será preenchido via id_cliente
+            equipamento TEXT,
+            numero_serie TEXT,
+            itens_internos TEXT,
+            defeito TEXT,
+            solucao TEXT DEFAULT '',
+            status TEXT DEFAULT 'Aberta',
+            data_entrada TEXT,
+            responsavel TEXT,
+            valor_orcamento REAL DEFAULT 0.0,
+            valor_servico_executado REAL DEFAULT 0.0,
+            pecas_adicionadas TEXT DEFAULT '',
+            valor_pecas REAL DEFAULT 0.0,
+            nome_aprovacao_cliente TEXT DEFAULT '',
+            data_aprovacao_cliente TEXT DEFAULT '',
+            FOREIGN KEY (id_cliente) REFERENCES clientes(id)
+        )
+    ''')
+    
+    # --- Verificações e ALTER TABLE para compatibilidade com bancos existentes ---
+    c.execute("PRAGMA table_info(ordens_servico)")
+    columns_os = [info[1] for info in c.fetchall()]
+
+    if 'valor_orcamento' not in columns_os:
+        c.execute("ALTER TABLE ordens_servico ADD COLUMN valor_orcamento REAL DEFAULT 0.0")
+    if 'valor_servico_executado' not in columns_os:
+        c.execute("ALTER TABLE ordens_servico ADD COLUMN valor_servico_executado REAL DEFAULT 0.0")
+    if 'pecas_adicionadas' not in columns_os:
+        c.execute("ALTER TABLE ordens_servico ADD COLUMN pecas_adicionadas TEXT DEFAULT ''")
+    if 'valor_pecas' not in columns_os:
+        c.execute("ALTER TABLE ordens_servico ADD COLUMN valor_pecas REAL DEFAULT 0.0")
+    if 'nome_aprovacao_cliente' not in columns_os:
+        c.execute("ALTER TABLE ordens_servico ADD COLUMN nome_aprovacao_cliente TEXT DEFAULT ''")
+    if 'data_aprovacao_cliente' not in columns_os:
+        c.execute("ALTER TABLE ordens_servico ADD COLUMN data_aprovacao_cliente TEXT DEFAULT ''")
+    if 'id_cliente' not in columns_os: # Adiciona id_cliente para OS existentes
+        c.execute("ALTER TABLE ordens_servico ADD COLUMN id_cliente INTEGER")
+    if 'solucao' not in columns_os: # Garante que solucao tem default
+        c.execute("ALTER TABLE ordens_servico ADD COLUMN solucao TEXT DEFAULT ''")
+
+    # -----------------------------------------------------------------------------
+
+    # Insere usuário admin padrão se não existir
     c.execute("SELECT COUNT(*) FROM usuarios")
     if c.fetchone()[0] == 0:
-        # Inserir o hash da senha 'admin' para o usuário padrão
         hashed_admin_senha = generate_password_hash("admin")
         c.execute("INSERT INTO usuarios (nome, login, senha, permissao) VALUES (?, ?, ?, ?)",
                   ("Administrador", "admin", hashed_admin_senha, "admin"))
     conn.commit()
     conn.close()
 
-# -- INÍCIO DA FUNÇÃO DE GERAÇÃO DE PDF APRIMORADA --
+# -- FUNÇÃO DE GERAÇÃO DE PDF APRIMORADA (com valor de orçamento, serviço executado, peças e APROVAÇÃO) --
 class PDF(FPDF):
     def header(self):
         self.set_fill_color(30, 144, 255) # Azul Royal
@@ -67,7 +121,7 @@ def gerar_pdf_os(os_dados):
     pdf = PDF()
     pdf.alias_nb_pages()
     pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15) # Margem para o rodapé
+    pdf.set_auto_page_break(auto=True, margin=15)
 
     pdf.set_text_color(0, 0, 0) # Texto preto
 
@@ -84,8 +138,8 @@ def gerar_pdf_os(os_dados):
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "Dados do Cliente", 0, 1, 'L', fill=True)
     pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 7, f"Nome: {os_dados['cliente']}", 0, 1, 'L')
-    pdf.cell(0, 7, f"Telefone: {os_dados['telefone']}", 0, 1, 'L')
+    pdf.cell(0, 7, f"Nome: {os_dados['cliente']}", 0, 1, 'L') # Usa o campo 'cliente' que virá do join
+    pdf.cell(0, 7, f"Telefone: {os_dados['telefone']}", 0, 1, 'L') # Usa o campo 'telefone' que virá do join
     pdf.ln(5)
 
     # Informações do Equipamento
@@ -100,7 +154,6 @@ def gerar_pdf_os(os_dados):
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "Itens Internos", 0, 1, 'L', fill=True)
     pdf.set_font("Arial", "", 10)
-    # Caixa de texto para itens internos
     pdf.multi_cell(0, 6, os_dados['itens_internos'], border=1, align='L')
     pdf.ln(5)
 
@@ -108,24 +161,84 @@ def gerar_pdf_os(os_dados):
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "Defeito Relatado", 0, 1, 'L', fill=True)
     pdf.set_font("Arial", "", 10)
-    # Caixa de texto para defeito
     pdf.multi_cell(0, 6, os_dados['defeito'], border=1, align='L')
     pdf.ln(5)
 
-    # Solução Aplicada e Status (condicionais)
+    # Solução Aplicada (condicionais)
     if 'solucao' in os_dados and os_dados['solucao']:
         pdf.set_font("Arial", "B", 12)
         pdf.cell(0, 8, "Solução Aplicada", 0, 1, 'L', fill=True)
         pdf.set_font("Arial", "", 10)
-        # Caixa de texto para solução
         pdf.multi_cell(0, 6, os_dados['solucao'], border=1, align='L')
         pdf.ln(5)
+    
+    # Peças e Materiais
+    if ('pecas_adicionadas' in os_dados and os_dados['pecas_adicionadas']) or \
+       ('valor_pecas' in os_dados and os_dados['valor_pecas'] is not None and os_dados['valor_pecas'] > 0):
+        pdf.set_fill_color(240, 248, 255) # Azul claro para o fundo
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 8, "Peças e Materiais", 0, 1, 'L', fill=True)
+        pdf.set_font("Arial", "", 10)
+        if 'pecas_adicionadas' in os_dados and os_dados['pecas_adicionadas']:
+            pdf.multi_cell(0, 6, os_dados['pecas_adicionadas'], border=1, align='L')
+        if 'valor_pecas' in os_dados and os_dados['valor_pecas'] is not None and os_dados['valor_pecas'] > 0:
+            pdf.cell(0, 7, f"Valor das Peças: R$ {os_dados['valor_pecas']:.2f}", 0, 1, 'L')
+        pdf.ln(5)
 
+    # Valores (Orçamento e Serviço Executado)
+    pdf.set_fill_color(200, 230, 255) # Azul claro para o fundo
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 8, "Valores", 0, 1, 'L', fill=True)
+    
+    if 'valor_orcamento' in os_dados and os_dados['valor_orcamento'] is not None:
+        pdf.set_font("Arial", "", 12)
+        pdf.cell(0, 7, f"Valor Orçado: R$ {os_dados['valor_orcamento']:.2f}", 0, 1, 'L')
+    
+    # Se valor_servico_executado for diferente de 0 e diferente do orçado, mostra como final
+    if 'valor_servico_executado' in os_dados and os_dados['valor_servico_executado'] is not None and os_dados['valor_servico_executado'] > 0 and os_dados['valor_servico_executado'] != os_dados['valor_orcamento']:
+        pdf.set_font("Arial", "B", 14)
+        pdf.set_text_color(0, 128, 0) # Verde escuro
+        pdf.cell(0, 10, f"Valor do Serviço: R$ {os_dados['valor_servico_executado']:.2f}", 0, 1, 'L')
+        pdf.set_text_color(0, 0, 0) # Retorna para preto
+    
+    # Calcula o valor total
+    valor_total = 0.0
+    # Prioriza valor_servico_executado para o cálculo do serviço, senão usa o orçado
+    if 'valor_servico_executado' in os_dados and os_dados['valor_servico_executado'] is not None:
+        valor_total += os_dados['valor_servico_executado']
+    elif 'valor_orcamento' in os_dados and os_dados['valor_orcamento'] is not None:
+        valor_total += os_dados['valor_orcamento']
+        
+    if 'valor_pecas' in os_dados and os_dados['valor_pecas'] is not None:
+        valor_total += os_dados['valor_pecas']
+
+    # Exibe o valor total se for maior que zero
+    if valor_total > 0:
+        pdf.set_font("Arial", "B", 16)
+        pdf.set_text_color(0, 0, 128) # Azul escuro
+        pdf.cell(0, 12, f"VALOR TOTAL: R$ {valor_total:.2f}", 0, 1, 'C')
+        pdf.set_text_color(0, 0, 0) # Retorna para preto
+    
+    pdf.ln(5)
+
+    # --- SEÇÃO DE APROVAÇÃO DO CLIENTE NO PDF ---
+    if 'nome_aprovacao_cliente' in os_dados and os_dados['nome_aprovacao_cliente']:
+        pdf.set_fill_color(220, 255, 220) # Verde claro para o fundo
+        pdf.set_font("Arial", "B", 12)
+        pdf.cell(0, 8, "Confirmação do Cliente", 0, 1, 'L', fill=True)
+        pdf.set_font("Arial", "", 10)
+        pdf.multi_cell(0, 6, f"Aprovado por: {os_dados['nome_aprovacao_cliente']}\nEm: {os_dados['data_aprovacao_cliente']}", border=1, align='L')
+        pdf.ln(5)
+    # --- FIM DA SEÇÃO DE APROVAÇÃO DO CLIENTE NO PDF ---
+
+    # Status (condicionais)
     if 'status' in os_dados and os_dados['status']:
         pdf.set_font("Arial", "B", 12)
+        pdf.set_text_color(255, 0, 0) # Cor vermelha para o status
         pdf.cell(0, 8, "Status da OS", 0, 1, 'L', fill=True)
         pdf.set_font("Arial", "BU", 12) # Negrito e sublinhado
         pdf.cell(0, 10, f"{os_dados['status']}", 0, 1, 'C')
+        pdf.set_text_color(0, 0, 0) # Retorna para preto
         pdf.ln(10)
 
     # Linha de assinatura
@@ -141,23 +254,44 @@ def gerar_pdf_os(os_dados):
 # -- FIM DA FUNÇÃO DE GERAÇÃO DE PDF APRIMORADA --
 
 
-# Rotas e lógica (sem alterações aqui, permanecem como na última versão)
+# Rotas e lógica (atualizadas para incluir os novos campos de valor e peças)
 @app.route('/', methods=['GET', 'POST'])
 def login():
+    if 'usuario_id' in session and 'permissao' in session: # Se já logado, redireciona
+        if session['permissao'] == 'cliente':
+            return redirect(url_for('cliente_dashboard'))
+        else:
+            return redirect(url_for('dashboard'))
+
     if request.method == 'POST':
-        login = request.form['usuario']
-        senha = request.form['senha']
+        login_input = request.form['usuario']
+        senha_input = request.form['senha']
         conn = sqlite3.connect(DB)
         c = conn.cursor()
-        c.execute("SELECT * FROM usuarios WHERE login=?", (login,))
+        
+        # Tenta autenticar como usuário interno (admin, tecnico, atendente)
+        c.execute("SELECT id, nome, login, senha, permissao FROM usuarios WHERE login=?", (login_input,))
         usuario = c.fetchone()
-        conn.close()
-        if usuario and check_password_hash(usuario[3], senha):
-            session['usuario'] = usuario[1]
+        if usuario and check_password_hash(usuario[3], senha_input):
+            session['usuario_id'] = usuario[0]
+            session['usuario_nome'] = usuario[1]
             session['permissao'] = usuario[4]
+            conn.close()
             return redirect(url_for('dashboard'))
-        else:
-            flash('Login inválido', 'danger')
+        
+        # Tenta autenticar como cliente web
+        c.execute("SELECT cw.id, cw.id_cliente, c.nome, cw.senha FROM clientes_web cw JOIN clientes c ON cw.id_cliente = c.id WHERE cw.login=?", (login_input,))
+        cliente_web = c.fetchone()
+        if cliente_web and check_password_hash(cliente_web[3], senha_input):
+            session['usuario_id'] = cliente_web[0] # id do clientes_web
+            session['id_cliente_associado'] = cliente_web[1] # id da tabela clientes
+            session['usuario_nome'] = cliente_web[2] # nome do cliente
+            session['permissao'] = 'cliente'
+            conn.close()
+            return redirect(url_for('cliente_dashboard'))
+        
+        conn.close()
+        flash('Login inválido', 'danger')
     return render_template('login.html')
 
 @app.route('/logout')
@@ -167,7 +301,8 @@ def logout():
 
 @app.route('/dashboard')
 def dashboard():
-    if 'usuario' not in session:
+    if 'usuario_id' not in session or session['permissao'] == 'cliente':
+        flash('Acesso não autorizado.', 'danger')
         return redirect(url_for('login'))
 
     conn = sqlite3.connect(DB)
@@ -188,15 +323,46 @@ def dashboard():
     conn.close()
 
     return render_template('dashboard.html',
-                           usuario=session['usuario'],
+                           usuario=session['usuario_nome'],
                            permissao=session['permissao'],
                            total_os=total_os,
                            os_abertas=os_abertas,
                            os_em_analise=os_em_analise,
                            os_finalizadas=os_finalizadas)
 
+# --- NOVO: Dashboard para Clientes ---
+@app.route('/cliente_dashboard')
+def cliente_dashboard():
+    if 'usuario_id' not in session or session['permissao'] != 'cliente':
+        flash('Acesso não autorizado.', 'danger')
+        return redirect(url_for('login'))
+
+    id_cliente = session['id_cliente_associado']
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    # Seleciona as OS vinculadas a este id_cliente
+    c.execute("""
+        SELECT 
+            os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+            os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+            os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+            os.nome_aprovacao_cliente, os.data_aprovacao_cliente
+        FROM ordens_servico os
+        JOIN clientes c ON os.id_cliente = c.id
+        WHERE os.id_cliente = ? ORDER BY os.id DESC
+    """, (id_cliente,))
+    ordens = c.fetchall()
+    conn.close()
+
+    return render_template('cliente_dashboard.html',
+                           usuario=session['usuario_nome'],
+                           ordens=ordens)
+# --- FIM DO NOVO: Dashboard para Clientes ---
+
+
 @app.route('/cadastrar_usuario', methods=['GET', 'POST'])
 def cadastrar_usuario():
+    # Apenas admin pode cadastrar usuários internos
     if 'permissao' not in session or session['permissao'] != 'admin':
         flash('Você não tem permissão para acessar esta página.', 'warning')
         return redirect(url_for('dashboard'))
@@ -205,7 +371,7 @@ def cadastrar_usuario():
         nome = request.form['nome']
         login = request.form['login']
         senha = request.form['senha']
-        permissao = request.form['permissao']
+        permissao = request.form['permissao'] # 'admin', 'tecnico', 'atendente'
 
         if not nome or not login or not senha or not permissao:
             flash('Todos os campos são obrigatórios.', 'danger')
@@ -218,7 +384,7 @@ def cadastrar_usuario():
             c.execute("INSERT INTO usuarios (nome, login, senha, permissao) VALUES (?, ?, ?, ?)",
                       (nome, login, hashed_senha, permissao))
             conn.commit()
-            flash('Usuário cadastrado com sucesso!', 'success')
+            flash('Usuário interno cadastrado com sucesso!', 'success')
         except sqlite3.IntegrityError:
             flash('Erro: O login informado já existe. Por favor, escolha outro.', 'danger')
         except Exception as e:
@@ -227,111 +393,323 @@ def cadastrar_usuario():
             conn.close()
     return render_template('cadastrar_usuario.html')
 
+# --- NOVO: Rotas de Gerenciamento de Clientes (para Admin/Atendente) ---
+@app.route('/cadastrar_cliente', methods=['GET', 'POST'])
+def cadastrar_cliente():
+    if 'permissao' not in session or session['permissao'] not in ['admin', 'atendente']:
+        flash('Você não tem permissão para acessar esta página.', 'warning')
+        return redirect(url_for('dashboard'))
+
+    if request.method == 'POST':
+        nome = request.form['nome'].strip()
+        cpf = request.form['cpf'].strip()
+        telefone = request.form['telefone'].strip()
+
+        if not nome or not cpf:
+            flash('Nome e CPF são campos obrigatórios.', 'danger')
+            return render_template('cadastrar_cliente.html')
+        
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
+        try:
+            c.execute("INSERT INTO clientes (nome, cpf, telefone) VALUES (?, ?, ?)",
+                      (nome, cpf, telefone))
+            conn.commit()
+            flash('Cliente cadastrado com sucesso!', 'success')
+            return redirect(url_for('listar_clientes')) # Redireciona para a lista de clientes após o sucesso
+        except sqlite3.IntegrityError:
+            flash('Erro: Já existe um cliente com este CPF.', 'danger')
+        except Exception as e:
+            flash(f'Erro ao cadastrar cliente: {e}', 'danger')
+        finally:
+            conn.close()
+    return render_template('cadastrar_cliente.html')
+
+@app.route('/listar_clientes')
+def listar_clientes():
+    if 'permissao' not in session or session['permissao'] not in ['admin', 'atendente', 'tecnico']:
+        flash('Você não tem permissão para acessar esta página.', 'warning')
+        return redirect(url_for('dashboard'))
+
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    # Junta com clientes_web para verificar se o cliente tem acesso web
+    c.execute("""
+        SELECT c.id, c.nome, c.cpf, c.telefone, cw.login IS NOT NULL AS tem_acesso_web
+        FROM clientes c
+        LEFT JOIN clientes_web cw ON c.id = cw.id_cliente
+        ORDER BY c.nome
+    """)
+    clientes = c.fetchall()
+    conn.close()
+    return render_template('listar_clientes.html', clientes=clientes)
+
+@app.route('/editar_cliente/<int:id>', methods=['GET', 'POST'])
+def editar_cliente(id):
+    if 'permissao' not in session or session['permissao'] not in ['admin', 'atendente']:
+        flash('Você não tem permissão para acessar esta página.', 'warning')
+        return redirect(url_for('dashboard'))
+
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    if request.method == 'POST':
+        nome = request.form['nome'].strip()
+        cpf = request.form['cpf'].strip()
+        telefone = request.form['telefone'].strip()
+        
+        # Lógica para criação/edição de acesso web para o cliente
+        criar_acesso_web = request.form.get('criar_acesso_web')
+        login_web = request.form.get('login_web', '').strip()
+        senha_web = request.form.get('senha_web', '').strip()
+        
+        if not nome or not cpf:
+            flash('Nome e CPF são campos obrigatórios para o cliente.', 'danger')
+            # Busca novamente os dados para re-renderizar
+            c.execute("SELECT id, nome, cpf, telefone FROM clientes WHERE id=?", (id,))
+            cliente_info = c.fetchone()
+            c.execute("SELECT login FROM clientes_web WHERE id_cliente=?", (id,))
+            cliente_web_info = c.fetchone()
+            conn.close()
+            return render_template('editar_cliente.html', cliente=cliente_info, cliente_web_login=cliente_web_info[0] if cliente_web_info else None)
+
+
+        try:
+            # Atualiza dados do cliente
+            c.execute("UPDATE clientes SET nome=?, cpf=?, telefone=? WHERE id=?", 
+                      (nome, cpf, telefone, id))
+            conn.commit()
+            flash('Dados do cliente atualizados com sucesso!', 'success')
+
+            # Lógica para acesso web
+            c.execute("SELECT id FROM clientes_web WHERE id_cliente=?", (id,))
+            acesso_web_existente = c.fetchone()
+
+            if criar_acesso_web and not acesso_web_existente:
+                if not login_web or not senha_web:
+                    flash('Login e Senha para o acesso web são obrigatórios.', 'danger')
+                else:
+                    hashed_senha_web = generate_password_hash(senha_web)
+                    c.execute("INSERT INTO clientes_web (id_cliente, login, senha) VALUES (?, ?, ?)",
+                              (id, login_web, hashed_senha_web))
+                    conn.commit()
+                    flash(f'Acesso web criado para o cliente {nome} com login: {login_web}!', 'success')
+            elif criar_acesso_web and acesso_web_existente:
+                 flash('Este cliente já possui acesso web. Desmarque "Criar Acesso Web" se quiser apenas editar os dados do cliente.', 'info')
+            elif not criar_acesso_web and acesso_web_existente and (login_web or senha_web): # Se desmarcou mas tentou mudar dados
+                 flash('Acesso web existente. Para criar novo acesso, exclua o existente primeiro (funcionalidade futura).', 'info')
+
+
+        except sqlite3.IntegrityError:
+            flash('Erro: Já existe outro cliente com este CPF.', 'danger')
+        except Exception as e:
+            flash(f'Erro ao atualizar cliente ou criar acesso web: {e}', 'danger')
+        finally:
+            conn.close()
+            # Redireciona para evitar reenvio do form e atualiza a página
+            return redirect(url_for('editar_cliente', id=id))
+    else:
+        # GET: Busca dados do cliente e se ele tem acesso web
+        c.execute("SELECT id, nome, cpf, telefone FROM clientes WHERE id=?", (id,))
+        cliente_info = c.fetchone()
+        if not cliente_info:
+            conn.close()
+            flash("Cliente não encontrado.", 'danger')
+            return redirect(url_for('listar_clientes'))
+        
+        c.execute("SELECT login FROM clientes_web WHERE id_cliente=?", (id,))
+        cliente_web_info = c.fetchone()
+        conn.close()
+
+        return render_template('editar_cliente.html', 
+                               cliente=cliente_info, 
+                               cliente_web_login=cliente_web_info[0] if cliente_web_info else None,
+                               permissao=session['permissao']) # Passa permissao para o template
+
+# --- FIM DO NOVO: Rotas de Gerenciamento de Clientes ---
+
 @app.route('/nova_os', methods=['GET', 'POST'])
 def nova_os():
-    if 'usuario' not in session:
+    if 'usuario_id' not in session or session['permissao'] == 'cliente':
+        flash('Você não tem permissão para acessar esta página.', 'danger')
         return redirect(url_for('login'))
+    
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    # Busca clientes para o dropdown
+    c.execute("SELECT id, nome, cpf FROM clientes ORDER BY nome")
+    clientes_cadastrados = c.fetchall()
+    conn.close()
+
     if request.method == 'POST':
-        cliente = request.form['cliente']
-        telefone = request.form['telefone']
+        id_cliente = request.form['id_cliente'] # NOVO: Pega o ID do cliente selecionado
         equipamento = request.form['equipamento']
         numero_serie = request.form['numero_serie']
         itens = request.form['itens']
         defeito = request.form['defeito']
-        responsavel = session['usuario']
+        responsavel = session['usuario_nome']
         data_entrada = datetime.now().strftime("%d/%m/%Y %H:%M")
+        valor_orcamento_str = request.form['valor_orcamento'].replace(',', '.') 
 
-        if not cliente or not telefone or not equipamento or not numero_serie or not itens or not defeito:
+        if not id_cliente or not equipamento or not numero_serie or not itens or not defeito or not valor_orcamento_str:
             flash('Todos os campos com (*) são obrigatórios.', 'danger')
-            return render_template('nova_os.html', usuario=session['usuario'])
+            return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
 
-        clean_telefone = ''.join(filter(str.isdigit, telefone))
-        if not clean_telefone.isdigit():
-            flash('O campo Telefone deve conter apenas números (opcionalmente com formatação comum como parênteses e traços).', 'danger')
-            return render_template('nova_os.html', usuario=session['usuario'])
-
+        try:
+            valor_orcamento = float(valor_orcamento_str)
+        except ValueError:
+            flash('O campo "Valor do Orçamento" deve ser um número válido.', 'danger')
+            return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
 
         codigo_os = f"OS-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
         conn = sqlite3.connect(DB)
         c = conn.cursor()
         try:
+            # Pega nome e telefone do cliente selecionado
+            c.execute("SELECT nome, telefone FROM clientes WHERE id=?", (id_cliente,))
+            cliente_info = c.fetchone()
+            cliente_nome = cliente_info[0]
+            cliente_telefone = cliente_info[1]
+
+            # Inclui id_cliente na inserção
             c.execute('''INSERT INTO ordens_servico
-                (codigo_os, cliente, telefone, equipamento, numero_serie, itens_internos, defeito, data_entrada, responsavel)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (codigo_os, cliente, telefone, equipamento, numero_serie, itens, defeito, data_entrada, responsavel))
+                (codigo_os, id_cliente, cliente, telefone, equipamento, numero_serie, itens_internos, defeito, data_entrada, responsavel, valor_orcamento, pecas_adicionadas, valor_pecas, nome_aprovacao_cliente, data_aprovacao_cliente)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (codigo_os, id_cliente, cliente_nome, cliente_telefone, equipamento, numero_serie, itens, defeito, data_entrada, responsavel, valor_orcamento, '', 0.0, '', ''))
             conn.commit()
 
-            os_dados = {
+            os_dados = { # Usa cliente_nome e cliente_telefone do DB para PDF
                 'codigo_os': codigo_os,
-                'cliente': cliente,
-                'telefone': telefone,
+                'cliente': cliente_nome, 
+                'telefone': cliente_telefone,
                 'equipamento': equipamento,
                 'numero_serie': numero_serie,
                 'itens_internos': itens,
                 'defeito': defeito,
                 'data_entrada': data_entrada,
-                'responsavel': responsavel
+                'responsavel': responsavel,
+                'valor_orcamento': valor_orcamento,
+                'valor_servico_executado': 0.0,
+                'pecas_adicionadas': '',
+                'valor_pecas': 0.0,
+                'nome_aprovacao_cliente': '',
+                'data_aprovacao_cliente': ''
             }
             gerar_pdf_os(os_dados)
-            flash(f"OS {codigo_os} criada com sucesso!", 'success')
-            return redirect(url_for('ver_pdf_os', codigo_os=codigo_os))
+            flash(f"OS **{codigo_os}** criada com sucesso! <a href='{url_for('ver_pdf_os', codigo_os=codigo_os)}' class='btn btn-sm btn-primary ms-3' target='_blank'>Visualizar/Imprimir OS</a>", 'success')
+            return redirect(url_for('nova_os'))
+
         except Exception as e:
             flash(f'Erro ao criar OS: {e}', 'danger')
         finally:
             conn.close()
-    return render_template('nova_os.html', usuario=session['usuario'])
+    return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
 
 @app.route('/listar_os')
 def listar_os():
-    if 'usuario' not in session:
+    if 'usuario_id' not in session or session['permissao'] == 'cliente':
+        flash('Você não tem permissão para acessar esta página.', 'danger')
         return redirect(url_for('login'))
 
-    filtro_cliente = request.args.get('cliente', '').strip()
+    filtro_cliente_nome = request.args.get('cliente', '').strip() # Filtra por nome do cliente
     filtro_status = request.args.get('status', '').strip()
 
     conn = sqlite3.connect(DB)
     c = conn.cursor()
 
-    query = "SELECT * FROM ordens_servico"
+    query = """
+        SELECT 
+            os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+            os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+            os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+            os.nome_aprovacao_cliente, os.data_aprovacao_cliente
+        FROM ordens_servico os
+        JOIN clientes c ON os.id_cliente = c.id
+    """
     params = []
     condicoes = []
-    if filtro_cliente:
-        condicoes.append("cliente LIKE ?")
-        params.append(f"%{filtro_cliente}%")
+    if filtro_cliente_nome:
+        condicoes.append("c.nome LIKE ?")
+        params.append(f"%{filtro_cliente_nome}%")
     if filtro_status:
-        condicoes.append("status = ?")
+        condicoes.append("os.status = ?")
         params.append(filtro_status)
     if condicoes:
         query += " WHERE " + " AND ".join(condicoes)
-    query += " ORDER BY id DESC"
+    query += " ORDER BY os.id DESC"
 
     c.execute(query, params)
     ordens = c.fetchall()
     conn.close()
-    return render_template('listar_os.html', ordens=ordens, usuario=session['usuario'], filtro_cliente=filtro_cliente, filtro_status=filtro_status)
+    return render_template('listar_os.html', ordens=ordens, usuario=session['usuario_nome'], filtro_cliente=filtro_cliente_nome, filtro_status=filtro_status)
+
 
 @app.route('/editar_os/<int:id>', methods=['GET', 'POST'])
 def editar_os(id):
-    if 'usuario' not in session:
+    if 'usuario_id' not in session or session['permissao'] == 'cliente':
+        flash('Você não tem permissão para acessar esta página.', 'danger')
         return redirect(url_for('login'))
+    
     conn = sqlite3.connect(DB)
     c = conn.cursor()
     if request.method == 'POST':
         solucao = request.form['solucao']
         status = request.form['status']
-        c.execute("UPDATE ordens_servico SET solucao=?, status=? WHERE id=?", (solucao, status, id))
+        valor_orcamento_str = request.form['valor_orcamento'].replace(',', '.') 
+        valor_servico_executado_str = request.form.get('valor_servico_executado', '0.0').replace(',', '.')
+        pecas_adicionadas = request.form.get('pecas_adicionadas', '').strip()
+        valor_pecas_str = request.form.get('valor_pecas', '0.0').replace(',', '.')
+        
+        try:
+            valor_orcamento = float(valor_orcamento_str)
+            valor_servico_executado = float(valor_servico_executado_str)
+            valor_pecas = float(valor_pecas_str)
+        except ValueError:
+            flash('Os campos de valor devem ser números válidos.', 'danger')
+            # Re-seleciona a OS para re-renderizar com dados atuais e a mensagem de erro
+            c.execute("""
+                SELECT 
+                    os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+                    os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+                    os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+                    os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
+                FROM ordens_servico os
+                JOIN clientes c ON os.id_cliente = c.id
+                WHERE os.id=?
+            """, (id,))
+            os_info = c.fetchone()
+            conn.close()
+            return render_template('editar_os.html', os=os_info, usuario=session['usuario_nome'])
+
+
+        # NOVO: Seleciona todos os campos existentes e os novos para atualização
+        # NOTA: nome_aprovacao_cliente e data_aprovacao_cliente NÃO são atualizados aqui,
+        # apenas pela rota de aprovação pública.
+        c.execute("UPDATE ordens_servico SET solucao=?, status=?, valor_orcamento=?, valor_servico_executado=?, pecas_adicionadas=?, valor_pecas=? WHERE id=?", 
+                  (solucao, status, valor_orcamento, valor_servico_executado, pecas_adicionadas, valor_pecas, id))
         conn.commit()
         
-        c.execute("SELECT * FROM ordens_servico WHERE id=?", (id,))
+        # Re-seleciona a OS para pegar o valor atualizado e gerar o PDF
+        # Ajuste no SELECT para pegar as novas colunas e dados do cliente via JOIN
+        c.execute("""
+            SELECT 
+                os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+                os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+                os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+                os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
+            FROM ordens_servico os
+            JOIN clientes c ON os.id_cliente = c.id
+            WHERE os.id=?
+        """, (id,))
         os_info = c.fetchone()
         conn.close()
 
         if os_info:
             os_dados_atualizados = {
                 'codigo_os': os_info[1],
-                'cliente': os_info[2],
-                'telefone': os_info[3],
+                'cliente': os_info[2], # Nome do cliente do JOIN
+                'telefone': os_info[3], # Telefone do cliente do JOIN
                 'equipamento': os_info[4],
                 'numero_serie': os_info[5],
                 'itens_internos': os_info[6],
@@ -339,20 +717,37 @@ def editar_os(id):
                 'solucao': os_info[8],
                 'status': os_info[9],
                 'data_entrada': os_info[10],
-                'responsavel': os_info[11]
+                'responsavel': os_info[11],
+                'valor_orcamento': os_info[12],
+                'valor_servico_executado': os_info[13],
+                'pecas_adicionadas': os_info[14],
+                'valor_pecas': os_info[15],
+                'nome_aprovacao_cliente': os_info[16],
+                'data_aprovacao_cliente': os_info[17]
             }
             gerar_pdf_os(os_dados_atualizados)
 
         flash("OS atualizada com sucesso!", 'success')
         return redirect(url_for('listar_os'))
     else:
-        c.execute("SELECT * FROM ordens_servico WHERE id=?", (id,))
+        # NOVO: Seleciona todos os campos, incluindo os de peças e aprovação, e dados do cliente
+        c.execute("""
+            SELECT 
+                os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+                os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+                os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+                os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
+            FROM ordens_servico os
+            JOIN clientes c ON os.id_cliente = c.id
+            WHERE os.id=?
+        """, (id,))
         os_info = c.fetchone()
         conn.close()
         if not os_info:
             flash("OS não encontrada.", 'danger')
             return redirect(url_for('listar_os'))
-        return render_template('editar_os.html', os=os_info, usuario=session['usuario'])
+        return render_template('editar_os.html', os=os_info, usuario=session['usuario_nome'])
+
 
 @app.route('/ver_pdf/<codigo_os>')
 def ver_pdf_os(codigo_os):
@@ -362,6 +757,71 @@ def ver_pdf_os(codigo_os):
     else:
         flash("PDF não encontrado.", 'danger')
         return redirect(url_for('dashboard'))
+
+# --- ROTA PÚBLICA PARA VISUALIZAÇÃO E APROVAÇÃO DA OS PELO CLIENTE (Não logado) ---
+@app.route('/os_cliente/<codigo_os>', methods=['GET', 'POST'])
+def visualizar_os_publica(codigo_os):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    # Pega todos os dados da OS, incluindo os campos de aprovação e dados do cliente
+    c.execute("""
+        SELECT 
+            os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+            os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+            os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+            os.nome_aprovacao_cliente, os.data_aprovacao_cliente
+        FROM ordens_servico os
+        JOIN clientes c ON os.id_cliente = c.id
+        WHERE os.codigo_os=?
+    """, (codigo_os,))
+    os_info_tuple = c.fetchone()
+
+    if not os_info_tuple:
+        conn.close()
+        return "Ordem de Serviço não encontrada.", 404
+    
+    # Converte a tupla para dicionário para facilitar o acesso no template
+    os_fields = [
+        'id', 'codigo_os', 'cliente', 'telefone', 'equipamento', 'numero_serie',
+        'itens_internos', 'defeito', 'solucao', 'status', 'data_entrada', 'responsavel',
+        'valor_orcamento', 'valor_servico_executado', 'pecas_adicionadas', 'valor_pecas',
+        'nome_aprovacao_cliente', 'data_aprovacao_cliente'
+    ]
+    os_dados = dict(zip(os_fields, os_info_tuple))
+
+    if request.method == 'POST':
+        nome_aprovacao = request.form.get('nome_aprovacao_cliente', '').strip()
+        if not nome_aprovacao:
+            flash('Por favor, digite seu nome para aprovar a Ordem de Serviço.', 'danger')
+            return render_template('visualizar_os_publica.html', os=os_dados)
+        
+        data_aprovacao = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+        try:
+            c.execute("UPDATE ordens_servico SET nome_aprovacao_cliente=?, data_aprovacao_cliente=? WHERE codigo_os=?", 
+                      (nome_aprovacao, data_aprovacao, codigo_os))
+            conn.commit()
+
+            # Atualiza os_dados para refletir a aprovação imediatamente na tela
+            os_dados['nome_aprovacao_cliente'] = nome_aprovacao
+            os_dados['data_aprovacao_cliente'] = data_aprovacao
+
+            # Regera o PDF para incluir a informação de aprovação
+            gerar_pdf_os(os_dados)
+
+            flash('Ordem de Serviço aprovada com sucesso!', 'success')
+            
+        except Exception as e:
+            flash(f'Erro ao registrar aprovação: {e}', 'danger')
+        finally:
+            conn.close()
+            # Após o POST, renderiza a mesma página atualizada
+            return render_template('visualizar_os_publica.html', os=os_dados)
+    
+    conn.close()
+    return render_template('visualizar_os_publica.html', os=os_dados)
+# --- FIM DA ROTA PÚBLICA ---
+
 
 if __name__ == '__main__':
     inicializar_banco()

@@ -10,44 +10,49 @@
 <nav class="navbar navbar-dark bg-dark">
   <div class="container-fluid">
     <span class="navbar-brand mb-0 h1">Bem-vindo, {{ usuario }}</span>
-    <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
+    <div class="d-flex">
+      <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
+    </div>
   </div>
 </nav>
 
 <div class="container mt-4">
   <h3>Nova Ordem de Serviço</h3>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-3">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
   <form method="POST" class="mt-3">
     <div class="mb-3">
-      <label class="form-label">Cliente</label>
+      <label class="form-label">Cliente *</label>
       <input type="text" name="cliente" class="form-control" required>
     </div>
     <div class="mb-3">
-      <label class="form-label">Telefone</label>
-      <input type="text" name="telefone" class="form-control" required>
+      <label class="form-label">Telefone *</label>
+      <input type="text" name="telefone" class="form-control" required placeholder="(XX) XXXX-XXXX ou XXXXX-XXXX">
     </div>
     <div class="mb-3">
-      <label class="form-label">Equipamento</label>
+      <label class="form-label">Equipamento *</label>
       <input type="text" name="equipamento" class="form-control" required>
     </div>
     <div class="mb-3">
-      <label class="form-label">Número de Série</label>
+      <label class="form-label">Número de Série *</label>
       <input type="text" name="numero_serie" class="form-control" required>
     </div>
     <div class="mb-3">
-      <label class="form-label">Itens Internos</label>
+      <label class="form-label">Itens Internos *</label>
       <textarea name="itens" class="form-control" rows="3" required></textarea>
     </div>
     <div class="mb-3">
-      <label class="form-label">Defeito Relatado</label>
+      <label class="form-label">Defeito Relatado *</label>
       <textarea name="defeito" class="form-control" rows="3" required></textarea>
     </div>
-    <button type="submit" class="btn btn-success">Salvar OS</button>
+    <button type="submit" class="btn btn-success">Criar OS</button>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-secondary ms-2">Voltar ao Dashboard</a>
   </form>
-  {% with messages = get_flashed_messages() %}
-    {% if messages %}
-      <div class="alert alert-info mt-3">{{ messages[0] }}</div>
-    {% endif %}
-  {% endwith %}
 </div>
 
 </body>

@@ -13,6 +13,7 @@
     <div class="d-flex">
       <span class="navbar-text text-white me-3">Usuário: {{ usuario }}</span>
       <a href="{{ url_for('nova_os') }}" class="btn btn-outline-light btn-sm me-2">Nova OS</a>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm me-2">Dashboard</a>
       <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
     </div>
   </div>
@@ -20,11 +21,37 @@
 
 <div class="container py-5">
   <h3 class="mb-4">Ordens de Serviço Registradas</h3>
-  {% with messages = get_flashed_messages() %}
+  {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
-      <div class="alert alert-info">{{ messages[0] }}</div>
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-3">{{ message }}</div>
+      {% endfor %}
     {% endif %}
   {% endwith %}
+
+  {# Formulário de Filtros #}
+  <div class="mb-4">
+    <form method="GET" class="row g-3 align-items-end">
+      <div class="col-md-4">
+        <label for="filtroCliente" class="form-label">Filtrar por Cliente:</label>
+        <input type="text" class="form-control" id="filtroCliente" name="cliente" value="{{ filtro_cliente }}">
+      </div>
+      <div class="col-md-3">
+        <label for="filtroStatus" class="form-label">Filtrar por Status:</label>
+        <select class="form-select" id="filtroStatus" name="status">
+          <option value="">Todos</option>
+          <option value="Aberta" {% if filtro_status == 'Aberta' %}selected{% endif %}>Aberta</option>
+          <option value="Em Análise" {% if filtro_status == 'Em Análise' %}selected{% endif %}>Em Análise</option>
+          <option value="Finalizada" {% if filtro_status == 'Finalizada' %}selected{% endif %}>Finalizada</option>
+        </select>
+      </div>
+      <div class="col-md-auto">
+        <button type="submit" class="btn btn-info">Aplicar Filtro</button>
+        <a href="{{ url_for('listar_os') }}" class="btn btn-secondary ms-2">Limpar Filtros</a>
+      </div>
+    </form>
+  </div>
+
   <table class="table table-striped">
     <thead>
       <tr>
@@ -48,8 +75,12 @@
         <td>{{ os[10] }}</td>
         <td>
           <a href="{{ url_for('editar_os', id=os[0]) }}" class="btn btn-sm btn-warning">Editar</a>
-          <a href="{{ url_for('ver_pdf_os', codigo_os=os[1]) }}" class="btn btn-sm btn-primary">Visualizar OS</a>
+          <a href="{{ url_for('ver_pdf_os', codigo_os=os[1]) }}" class="btn btn-sm btn-primary" target="_blank">Visualizar OS</a> {# Adicionado target="_blank" para abrir em nova aba #}
         </td>
+      </tr>
+      {% else %}
+      <tr>
+        <td colspan="7">Nenhuma Ordem de Serviço encontrada.</td>
       </tr>
       {% endfor %}
     </tbody>

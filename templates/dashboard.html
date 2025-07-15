@@ -22,6 +22,51 @@
 <div class="container py-5">
   <h2 class="mb-4">Bem-vindo ao Painel Principal</h2>
 
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-3">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  {# Contadores de OS #}
+  <div class="row g-4 mb-5">
+    <div class="col-md-3">
+      <div class="card text-center bg-primary text-white">
+        <div class="card-body">
+          <h5 class="card-title">Total de OS</h5>
+          <p class="card-text fs-2">{{ total_os }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center bg-info text-white">
+        <div class="card-body">
+          <h5 class="card-title">OS Abertas</h5>
+          <p class="card-text fs-2">{{ os_abertas }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center bg-warning text-dark">
+        <div class="card-body">
+          <h5 class="card-title">OS Em Análise</h5>
+          <p class="card-text fs-2">{{ os_em_analise }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-center bg-success text-white">
+        <div class="card-body">
+          <h5 class="card-title">OS Finalizadas</h5>
+          <p class="card-text fs-2">{{ os_finalizadas }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
   <div class="row g-4">
     <div class="col-md-4">
       <a href="{{ url_for('nova_os') }}" class="btn btn-success w-100 py-3">
@@ -38,8 +83,8 @@
     {% endif %}
 
     <div class="col-md-4">
-      <a href="#" class="btn btn-secondary w-100 py-3 disabled">
-        📋 Listar Ordens (em breve)
+      <a href="{{ url_for('listar_os') }}" class="btn btn-secondary w-100 py-3">
+        📋 Listar Ordens
       </a>
     </div>
   </div>

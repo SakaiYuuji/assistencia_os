@@ -23,7 +23,7 @@ Sistema completo para controle de entrada de equipamentos técnicos, geração d
 ## 📦 Como rodar localmente
 
 ```bash
-git clone https://github.com/SakaiYuuji/assistencia_os
+git clone https://github.com/SakaiYuuji/assistencia_os.git
 cd assistencia_os
 pip install -r requirements.txt
 python app.py

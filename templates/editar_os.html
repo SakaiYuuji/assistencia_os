@@ -12,7 +12,7 @@
     <span class="navbar-brand">Editar OS - {{ os[1] }}</span>
     <div class="d-flex">
       <span class="navbar-text text-white me-3">Usuário: {{ usuario }}</span>
-      <a href="{{ url_for('listar_os') }}" class="btn btn-outline-light btn-sm me-2">Voltar</a>
+      <a href="{{ url_for('listar_os') }}" class="btn btn-outline-light btn-sm me-2">Voltar para Lista</a>
       <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
     </div>
   </div>
@@ -20,19 +20,47 @@
 
 <div class="container py-5">
   <h3>Ordem de Serviço: {{ os[1] }}</h3>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-3">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
   <form method="POST">
     <div class="mb-3">
       <label class="form-label">Cliente:</label>
       <input type="text" class="form-control" value="{{ os[2] }}" disabled>
     </div>
     <div class="mb-3">
+      <label class="form-label">Telefone:</label>
+      <input type="text" class="form-control" value="{{ os[3] }}" disabled>
+    </div>
+    <div class="mb-3">
       <label class="form-label">Equipamento:</label>
       <input type="text" class="form-control" value="{{ os[4] }}" disabled>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Número de Série:</label>
+      <input type="text" class="form-control" value="{{ os[5] }}" disabled>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Itens Internos:</label>
+      <textarea class="form-control" rows="2" disabled>{{ os[6] }}</textarea>
     </div>
     <div class="mb-3">
       <label class="form-label">Defeito Informado:</label>
       <textarea class="form-control" rows="2" disabled>{{ os[7] }}</textarea>
     </div>
+    <div class="mb-3">
+      <label class="form-label">Data de Entrada:</label>
+      <input type="text" class="form-control" value="{{ os[10] }}" disabled>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Responsável:</label>
+      <input type="text" class="form-control" value="{{ os[11] }}" disabled>
+    </div>
+    <hr>
     <div class="mb-3">
       <label class="form-label">Solução Aplicada:</label>
       <textarea class="form-control" name="solucao" rows="3">{{ os[8] or '' }}</textarea>
@@ -45,7 +73,8 @@
         <option value="Finalizada" {% if os[9] == 'Finalizada' %}selected{% endif %}>Finalizada</option>
       </select>
     </div>
-    <button type="submit" class="btn btn-success">Salvar Alterações</button>
+    <button type="submit" class="btn btn-warning">Atualizar OS</button>
+    <a href="{{ url_for('ver_pdf_os', codigo_os=os[1]) }}" class="btn btn-primary ms-2" target="_blank">Gerar/Ver PDF Atualizado</a>
   </form>
 </div>
 

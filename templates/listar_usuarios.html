@@ -1,4 +1,44 @@
-<tbody>
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Lista de Usuários</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="{{ url_for('dashboard') }}">Sistema OS</a>
+    <div class="d-flex">
+      <span class="navbar-text text-white me-3">Usuário: {{ session['usuario_nome'] }}</span>
+      <a href="{{ url_for('cadastrar_usuario') }}" class="btn btn-outline-light btn-sm me-2">Novo Usuário</a>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm me-2">Voltar ao Painel</a>
+      <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-5">
+  <h3>Usuários Cadastrados</h3>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-2">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <table class="table table-striped table-hover mt-4">
+    <thead>
+      <tr>
+        <th>Nome</th>
+        <th>Login</th>
+        <th>Permissão</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody>
     {% for usuario in usuarios %}
     <tr>
         <td>{{ usuario.nome }}</td>
@@ -6,7 +46,16 @@
         <td>{{ usuario.permissao }}</td>
         <td>
             <a href="{{ url_for('editar_usuario', usuario_id=usuario.id) }}" class="btn btn-sm btn-info">Editar</a>
-            </td>
+            <form action="{{ url_for('excluir_usuario', usuario_id=usuario.id) }}" method="POST" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja excluir o usuário {{ usuario.nome }}? Esta ação é irreversível.');">
+                <button type="submit" class="btn btn-sm btn-danger">Remover</button>
+            </form>
+        </td>
     </tr>
     {% endfor %}
 </tbody>
+  </table>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

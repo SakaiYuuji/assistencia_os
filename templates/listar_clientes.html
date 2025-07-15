@@ -41,11 +41,11 @@
       </tr>
     </thead>
     <tbody>
-      {% for cliente in clientes %}
-      <tr>
+    {% for cliente in clientes %}
+    <tr>
         <td>{{ cliente[0] }}</td> {# id #}
         <td>{{ cliente[1] }}</td> {# nome #}
-        <td>{{ cliente[2] }}</td> {# cpf #}
+        <td>{{ cliente[2] }}</td> {# cpf #}\
         <td>{{ cliente[3] or 'N/A' }}</td> {# telefone #}
         <td>
           {% if cliente[4] %} {# tem_acesso_web (True/False) #}
@@ -56,15 +56,18 @@
         </td>
         <td>
           <a href="{{ url_for('editar_cliente', id=cliente[0]) }}" class="btn btn-sm btn-primary">Editar</a>
+          <form action="{{ url_for('excluir_cliente', cliente_id=cliente[0]) }}" method="POST" style="display:inline;" onsubmit="return confirm('Tem certeza que deseja excluir o cliente {{ cliente[1] }}? Esta ação também removerá o acesso web do cliente (se existir) e só será possível se não houver ordens de serviço vinculadas. Esta ação é irreversível.');">
+              <button type="submit" class="btn btn-sm btn-danger">Remover</button>
+          </form>
         </td>
-      </tr>
-      {% endfor %}
-      {% if not clientes %}
-      <tr>
-        <td colspan="6" class="text-center">Nenhum cliente cadastrado.</td>
-      </tr>
-      {% endif %}
-    </tbody>
+    </tr>
+    {% endfor %}
+    {% if not clientes %}
+    <tr>
+      <td colspan="6" class="text-center">Nenhum cliente cadastrado.</td>
+    </tr>
+    {% endif %}
+</tbody>
   </table>
 </div>
 

@@ -1,64 +1,78 @@
 import sqlite3
-import os
-from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, session, flash, send_file
-from fpdf import FPDF
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
 from werkzeug.security import generate_password_hash, check_password_hash
+import os
+import uuid
+from datetime import datetime
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.units import cm
 
 app = Flask(__name__)
-app.secret_key = 'aB3c#D5e@F7g$H9i!J1k%L2m^N4o&P6q*R8s+T0u=VwXyZ'
+app.secret_key = 'aB3c#D5e@F7g$H9i!J1k%L2m^N4o&P6q*R8s+T0u=VwXyZ' # Mude para uma chave secreta forte e aleatória
 DB = 'assistencia.db'
-PDF_DIR = 'pdfs'
-os.makedirs(PDF_DIR, exist_ok=True)
+PDF_DIR = 'static/os_pdfs' # Diretório para salvar os PDFs
 
-# Inicializa banco e cria tabelas com campos extras
+# Garante que o diretório de PDFs exista
+if not os.path.exists(PDF_DIR):
+    os.makedirs(PDF_DIR)
+
 def inicializar_banco():
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    
-    # Tabela de Usuários Internos (admin, tecnico, atendente)
-    c.execute('''CREATE TABLE IF NOT EXISTS usuarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        login TEXT UNIQUE NOT NULL,
-        senha TEXT NOT NULL,
-        permissao TEXT DEFAULT 'admin' -- 'admin', 'tecnico', 'atendente'
-    )''')
 
-    # NOVO: Tabela de Clientes (dados gerais do cliente)
-    c.execute('''CREATE TABLE IF NOT EXISTS clientes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        cpf TEXT UNIQUE NOT NULL, -- CPF como identificador único para o cliente
-        telefone TEXT
-    )''')
+    # Tabela de Usuários (agora inclui clientes com permissao='cliente')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            login TEXT NOT NULL UNIQUE,
+            senha TEXT NOT NULL,
+            permissao TEXT NOT NULL,
+            id_cliente INTEGER,
+            FOREIGN KEY (id_cliente) REFERENCES clientes(id)
+        )
+    ''')
 
-    # NOVO: Tabela de Acessos Web para Clientes (login do cliente externo)
-    c.execute('''CREATE TABLE IF NOT EXISTS clientes_web (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_cliente INTEGER NOT NULL,
-        login TEXT UNIQUE NOT NULL,
-        senha TEXT NOT NULL,
-        FOREIGN KEY (id_cliente) REFERENCES clientes(id)
-    )''')
+    # Adiciona a coluna id_cliente se ela não existir
+    try:
+        c.execute("ALTER TABLE usuarios ADD COLUMN id_cliente INTEGER REFERENCES clientes(id)")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e):
+            print(f"Erro ao adicionar coluna id_cliente: {e}")
 
-    # Tabela de Ordens de Serviço (com FK para clientes)
-    # Garante que a tabela é criada com todos os campos ou adiciona se já existir
+    # Remove a tabela clientes_web (agora obsoleta)
+    c.execute("DROP TABLE IF EXISTS clientes_web")
+
+    # Tabela de Clientes
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS clientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            cpf TEXT NOT NULL UNIQUE,
+            telefone TEXT
+        )
+    ''')
+
+    # Tabela de Ordens de Serviço
     c.execute('''
         CREATE TABLE IF NOT EXISTS ordens_servico (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            codigo_os TEXT,
-            id_cliente INTEGER, -- NOVO CAMPO: Chave estrangeira para a tabela 'clientes'
-            cliente TEXT,       -- Mantido temporariamente para compatibilidade, será preenchido via id_cliente
-            telefone TEXT,      -- Mantido temporariamente para compatibilidade, será preenchido via id_cliente
-            equipamento TEXT,
-            numero_serie TEXT,
-            itens_internos TEXT,
-            defeito TEXT,
+            codigo_os TEXT NOT NULL UNIQUE,
+            id_cliente INTEGER NOT NULL,
+            cliente TEXT NOT NULL,
+            telefone TEXT,
+            equipamento TEXT NOT NULL,
+            numero_serie TEXT NOT NULL,
+            itens_internos TEXT NOT NULL,
+            defeito TEXT NOT NULL,
             solucao TEXT DEFAULT '',
             status TEXT DEFAULT 'Aberta',
-            data_entrada TEXT,
-            responsavel TEXT,
+            data_entrada TEXT NOT NULL,
+            responsavel TEXT NOT NULL,
             valor_orcamento REAL DEFAULT 0.0,
             valor_servico_executado REAL DEFAULT 0.0,
             pecas_adicionadas TEXT DEFAULT '',
@@ -68,414 +82,372 @@ def inicializar_banco():
             FOREIGN KEY (id_cliente) REFERENCES clientes(id)
         )
     ''')
-    
-    # --- Verificações e ALTER TABLE para compatibilidade com bancos existentes ---
-    c.execute("PRAGMA table_info(ordens_servico)")
-    columns_os = [info[1] for info in c.fetchall()]
 
-    if 'valor_orcamento' not in columns_os:
-        c.execute("ALTER TABLE ordens_servico ADD COLUMN valor_orcamento REAL DEFAULT 0.0")
-    if 'valor_servico_executado' not in columns_os:
-        c.execute("ALTER TABLE ordens_servico ADD COLUMN valor_servico_executado REAL DEFAULT 0.0")
-    if 'pecas_adicionadas' not in columns_os:
-        c.execute("ALTER TABLE ordens_servico ADD COLUMN pecas_adicionadas TEXT DEFAULT ''")
-    if 'valor_pecas' not in columns_os:
-        c.execute("ALTER TABLE ordens_servico ADD COLUMN valor_pecas REAL DEFAULT 0.0")
-    if 'nome_aprovacao_cliente' not in columns_os:
-        c.execute("ALTER TABLE ordens_servico ADD COLUMN nome_aprovacao_cliente TEXT DEFAULT ''")
-    if 'data_aprovacao_cliente' not in columns_os:
-        c.execute("ALTER TABLE ordens_servico ADD COLUMN data_aprovacao_cliente TEXT DEFAULT ''")
-    if 'id_cliente' not in columns_os: # Adiciona id_cliente para OS existentes
-        c.execute("ALTER TABLE ordens_servico ADD COLUMN id_cliente INTEGER")
-    if 'solucao' not in columns_os: # Garante que solucao tem default
-        c.execute("ALTER TABLE ordens_servico ADD COLUMN solucao TEXT DEFAULT ''")
-
-    # -----------------------------------------------------------------------------
-
-    # Insere usuário admin padrão se não existir
-    c.execute("SELECT COUNT(*) FROM usuarios")
+    # Cria um usuário admin padrão se não houver nenhum
+    c.execute("SELECT COUNT(*) FROM usuarios WHERE permissao='admin'")
     if c.fetchone()[0] == 0:
-        hashed_admin_senha = generate_password_hash("admin")
+        hashed_password = generate_password_hash('admin', method='pbkdf2:sha256')
         c.execute("INSERT INTO usuarios (nome, login, senha, permissao) VALUES (?, ?, ?, ?)",
-                  ("Administrador", "admin", hashed_admin_senha, "admin"))
-    conn.commit()
+                  ('Administrador', 'admin', hashed_password, 'admin'))
+        conn.commit()
+        print("Usuário administrador padrão criado (login: admin, senha: admin)")
+
     conn.close()
 
-# -- FUNÇÃO DE GERAÇÃO DE PDF APRIMORADA (com valor de orçamento, serviço executado, peças e APROVAÇÃO) --
-class PDF(FPDF):
-    def header(self):
-        self.set_fill_color(30, 144, 255) # Azul Royal
-        self.rect(0, 0, self.w, 20, 'F')
-        self.set_text_color(255, 255, 255) # Texto branco
-        self.set_font("Arial", "B", 16)
-        self.cell(0, 10, "Ordem de Serviço", 0, 1, 'C', fill=False)
-        self.ln(10)
-
-    def footer(self):
-        self.set_y(-15)
-        self.set_font("Arial", "I", 8)
-        self.set_text_color(128, 128, 128) # Cinza
-        self.cell(0, 10, f"Página {self.page_no()}/{{nb}}", 0, 0, 'C')
-
 def gerar_pdf_os(os_dados):
-    pdf = PDF()
-    pdf.alias_nb_pages()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf_file_path = os.path.join(PDF_DIR, f"{os_dados['codigo_os']}.pdf")
+    c = canvas.Canvas(pdf_file_path, pagesize=A4)
+    width, height = A4
 
-    pdf.set_text_color(0, 0, 0) # Texto preto
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Title', fontSize=18, spaceAfter=14, alignment=1)) # Center alignment
+    styles.add(ParagraphStyle(name='Heading2', fontSize=14, spaceAfter=8, textColor=colors.darkblue))
+    styles.add(ParagraphStyle(name='BodyText', fontSize=10, spaceAfter=6))
+    styles.add(ParagraphStyle(name='SmallText', fontSize=8, spaceAfter=4))
+    styles.add(ParagraphStyle(name='BoldBodyText', fontSize=10, fontName='Helvetica-Bold', spaceAfter=6))
 
-    # Título principal da OS
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, f"OS: {os_dados['codigo_os']}", 0, 1, 'L')
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 7, f"Data de Entrada: {os_dados['data_entrada']}", 0, 1, 'L')
-    pdf.cell(0, 7, f"Responsável: {os_dados['responsavel']}", 0, 1, 'L')
-    pdf.ln(5)
+    # Title
+    c.setFont('Helvetica-Bold', 24)
+    c.drawCentredString(width / 2.0, height - 50, "Ordem de Serviço")
 
-    # Informações do Cliente
-    pdf.set_fill_color(220, 220, 220) # Cinza claro para o fundo
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 8, "Dados do Cliente", 0, 1, 'L', fill=True)
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 7, f"Nome: {os_dados['cliente']}", 0, 1, 'L') # Usa o campo 'cliente' que virá do join
-    pdf.cell(0, 7, f"Telefone: {os_dados['telefone']}", 0, 1, 'L') # Usa o campo 'telefone' que virá do join
-    pdf.ln(5)
+    # Company Info (adjust as needed)
+    c.setFont('Helvetica', 9)
+    c.drawString(cm, height - 80, "Sua Empresa de Assistência Técnica")
+    c.drawString(cm, height - 90, "Endereço: Rua Principal, 123 - Cidade - Estado")
+    c.drawString(cm, height - 100, "Telefone: (XX) XXXX-XXXX | E-mail: contato@empresa.com")
+    c.line(cm, height - 105, width - cm, height - 105)
 
-    # Informações do Equipamento
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 8, "Dados do Equipamento", 0, 1, 'L', fill=True)
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 7, f"Tipo: {os_dados['equipamento']}", 0, 1, 'L')
-    pdf.cell(0, 7, f"Número de Série: {os_dados['numero_serie']}", 0, 1, 'L')
-    pdf.ln(5)
+    elements = []
 
-    # Itens Internos
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 8, "Itens Internos", 0, 1, 'L', fill=True)
-    pdf.set_font("Arial", "", 10)
-    pdf.multi_cell(0, 6, os_dados['itens_internos'], border=1, align='L')
-    pdf.ln(5)
+    # Basic OS Info & Client Info
+    elements.append(Paragraph(f"<font size=12><b>CÓDIGO OS: {os_dados['codigo_os']}</b></font>", styles['BodyText']))
+    elements.append(Paragraph(f"<b>Data de Entrada:</b> {os_dados['data_entrada']}", styles['BodyText']))
+    elements.append(Paragraph(f"<b>Responsável (Abertura):</b> {os_dados['responsavel']}", styles['BodyText']))
+    elements.append(Spacer(1, 0.2*cm))
 
-    # Defeito Relatado
-    pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 8, "Defeito Relatado", 0, 1, 'L', fill=True)
-    pdf.set_font("Arial", "", 10)
-    pdf.multi_cell(0, 6, os_dados['defeito'], border=1, align='L')
-    pdf.ln(5)
+    elements.append(Paragraph("<b>DADOS DO CLIENTE:</b>", styles['Heading2']))
+    elements.append(Paragraph(f"<b>Nome:</b> {os_dados['cliente']}", styles['BodyText']))
+    elements.append(Paragraph(f"<b>Telefone:</b> {os_dados['telefone'] or 'N/A'}", styles['BodyText']))
+    elements.append(Spacer(1, 0.4*cm))
 
-    # Solução Aplicada (condicionais)
-    if 'solucao' in os_dados and os_dados['solucao']:
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 8, "Solução Aplicada", 0, 1, 'L', fill=True)
-        pdf.set_font("Arial", "", 10)
-        pdf.multi_cell(0, 6, os_dados['solucao'], border=1, align='L')
-        pdf.ln(5)
+    # Equipment Info
+    elements.append(Paragraph("<b>DADOS DO EQUIPAMENTO:</b>", styles['Heading2']))
+    elements.append(Paragraph(f"<b>Equipamento:</b> {os_dados['equipamento']}", styles['BodyText']))
+    elements.append(Paragraph(f"<b>Número de Série:</b> {os_dados['numero_serie']}", styles['BodyText']))
+    elements.append(Paragraph(f"<b>Itens/Acessórios Internos:</b> {os_dados['itens_internos']}", styles['BodyText']))
+    elements.append(Paragraph(f"<b>Defeito Relatado:</b> {os_dados['defeito']}", styles['BodyText']))
+    elements.append(Spacer(1, 0.4*cm))
+
+    # Service Details (only if OS is being edited/finalized)
+    if os_dados.get('solucao'):
+        elements.append(Paragraph("<b>DETALHES DO SERVIÇO:</b>", styles['Heading2']))
+        elements.append(Paragraph(f"<b>Solução Aplicada:</b> {os_dados['solucao']}", styles['BodyText']))
+        elements.append(Paragraph(f"<b>Status Atual:</b> {os_dados['status']}", styles['BodyText']))
+        if os_dados.get('pecas_adicionadas'):
+            elements.append(Paragraph(f"<b>Peças Adicionadas:</b> {os_dados['pecas_adicionadas']}", styles['BodyText']))
+            elements.append(Paragraph(f"<b>Valor das Peças:</b> R$ {os_dados['valor_pecas']:.2f}", styles['BodyText']))
+        elements.append(Spacer(1, 0.4*cm))
+
+    # Financial Summary
+    elements.append(Paragraph("<b>RESUMO FINANCEIRO:</b>", styles['Heading2']))
+    elements.append(Paragraph(f"<b>Valor Orçado:</b> R$ {os_dados['valor_orcamento']:.2f}", styles['BoldBodyText']))
     
-    # Peças e Materiais
-    if ('pecas_adicionadas' in os_dados and os_dados['pecas_adicionadas']) or \
-       ('valor_pecas' in os_dados and os_dados['valor_pecas'] is not None and os_dados['valor_pecas'] > 0):
-        pdf.set_fill_color(240, 248, 255) # Azul claro para o fundo
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 8, "Peças e Materiais", 0, 1, 'L', fill=True)
-        pdf.set_font("Arial", "", 10)
-        if 'pecas_adicionadas' in os_dados and os_dados['pecas_adicionadas']:
-            pdf.multi_cell(0, 6, os_dados['pecas_adicionadas'], border=1, align='L')
-        if 'valor_pecas' in os_dados and os_dados['valor_pecas'] is not None and os_dados['valor_pecas'] > 0:
-            pdf.cell(0, 7, f"Valor das Peças: R$ {os_dados['valor_pecas']:.2f}", 0, 1, 'L')
-        pdf.ln(5)
+    valor_total_final = os_dados.get('valor_servico_executado', 0.0) + os_dados.get('valor_pecas', 0.0)
+    if os_dados.get('valor_servico_executado') is not None and os_dados.get('valor_servico_executado') > 0:
+        elements.append(Paragraph(f"<b>Valor do Serviço Executado:</b> R$ {os_dados['valor_servico_executado']:.2f}", styles['BodyText']))
+        elements.append(Paragraph(f"<b>Valor Total Estimado/Final:</b> R$ {valor_total_final:.2f}", styles['BoldBodyText']))
 
-    # Valores (Orçamento e Serviço Executado)
-    pdf.set_fill_color(200, 230, 255) # Azul claro para o fundo
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 8, "Valores", 0, 1, 'L', fill=True)
+    elements.append(Spacer(1, 0.8*cm))
+
+    # Approval Section
+    elements.append(Paragraph("<b>APROVAÇÃO DO CLIENTE:</b>", styles['Heading2']))
+    if os_dados.get('nome_aprovacao_cliente'):
+        elements.append(Paragraph(f"<b>Aprovado por:</b> {os_dados['nome_aprovacao_cliente']}", styles['BodyText']))
+        elements.append(Paragraph(f"<b>Data da Aprovação:</b> {os_dados['data_aprovacao_cliente']}", styles['BodyText']))
+    else:
+        elements.append(Paragraph("Aguardando aprovação do cliente.", styles['BodyText']))
+    elements.append(Spacer(1, 1.5*cm)) # More space for signature
+
+    elements.append(Paragraph("_______________________________________", styles['BodyText']))
+    elements.append(Paragraph("Assinatura do Cliente", styles['BodyText']))
+    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Paragraph("_______________________________________", styles['BodyText']))
+    elements.append(Paragraph("Assinatura do Responsável (Técnico/Atendente)", styles['BodyText']))
+
+    # Flowables positioning
+    from reportlab.platypus import SimpleDocTemplate
+    doc = SimpleDocTemplate(pdf_file_path, pagesize=A4,
+                            rightMargin=cm, leftMargin=cm,
+                            topMargin=height - 110, bottomMargin=cm) # Adjust top margin to avoid overlap with header
     
-    if 'valor_orcamento' in os_dados and os_dados['valor_orcamento'] is not None:
-        pdf.set_font("Arial", "", 12)
-        pdf.cell(0, 7, f"Valor Orçado: R$ {os_dados['valor_orcamento']:.2f}", 0, 1, 'L')
-    
-    # Se valor_servico_executado for diferente de 0 e diferente do orçado, mostra como final
-    if 'valor_servico_executado' in os_dados and os_dados['valor_servico_executado'] is not None and os_dados['valor_servico_executado'] > 0 and os_dados['valor_servico_executado'] != os_dados['valor_orcamento']:
-        pdf.set_font("Arial", "B", 14)
-        pdf.set_text_color(0, 128, 0) # Verde escuro
-        pdf.cell(0, 10, f"Valor do Serviço: R$ {os_dados['valor_servico_executado']:.2f}", 0, 1, 'L')
-        pdf.set_text_color(0, 0, 0) # Retorna para preto
-    
-    # Calcula o valor total
-    valor_total = 0.0
-    # Prioriza valor_servico_executado para o cálculo do serviço, senão usa o orçado
-    if 'valor_servico_executado' in os_dados and os_dados['valor_servico_executado'] is not None:
-        valor_total += os_dados['valor_servico_executado']
-    elif 'valor_orcamento' in os_dados and os_dados['valor_orcamento'] is not None:
-        valor_total += os_dados['valor_orcamento']
-        
-    if 'valor_pecas' in os_dados and os_dados['valor_pecas'] is not None:
-        valor_total += os_dados['valor_pecas']
+    # Manually place header elements outside of SimpleDocTemplate flowables
+    # This section is already drawn by c.drawString and c.drawCentredString at the beginning.
 
-    # Exibe o valor total se for maior que zero
-    if valor_total > 0:
-        pdf.set_font("Arial", "B", 16)
-        pdf.set_text_color(0, 0, 128) # Azul escuro
-        pdf.cell(0, 12, f"VALOR TOTAL: R$ {valor_total:.2f}", 0, 1, 'C')
-        pdf.set_text_color(0, 0, 0) # Retorna para preto
-    
-    pdf.ln(5)
-
-    # --- SEÇÃO DE APROVAÇÃO DO CLIENTE NO PDF ---
-    if 'nome_aprovacao_cliente' in os_dados and os_dados['nome_aprovacao_cliente']:
-        pdf.set_fill_color(220, 255, 220) # Verde claro para o fundo
-        pdf.set_font("Arial", "B", 12)
-        pdf.cell(0, 8, "Confirmação do Cliente", 0, 1, 'L', fill=True)
-        pdf.set_font("Arial", "", 10)
-        pdf.multi_cell(0, 6, f"Aprovado por: {os_dados['nome_aprovacao_cliente']}\nEm: {os_dados['data_aprovacao_cliente']}", border=1, align='L')
-        pdf.ln(5)
-    # --- FIM DA SEÇÃO DE APROVAÇÃO DO CLIENTE NO PDF ---
-
-    # Status (condicionais)
-    if 'status' in os_dados and os_dados['status']:
-        pdf.set_font("Arial", "B", 12)
-        pdf.set_text_color(255, 0, 0) # Cor vermelha para o status
-        pdf.cell(0, 8, "Status da OS", 0, 1, 'L', fill=True)
-        pdf.set_font("Arial", "BU", 12) # Negrito e sublinhado
-        pdf.cell(0, 10, f"{os_dados['status']}", 0, 1, 'C')
-        pdf.set_text_color(0, 0, 0) # Retorna para preto
-        pdf.ln(10)
-
-    # Linha de assinatura
-    pdf.ln(15)
-    pdf.line(20, pdf.get_y(), pdf.w - 20, pdf.get_y())
-    pdf.set_font("Arial", "", 10)
-    pdf.cell(0, 10, "Assinatura do Cliente", 0, 1, 'C')
+    # Build the PDF
+    doc.build(elements)
 
 
-    filename = f"{PDF_DIR}/{os_dados['codigo_os']}.pdf"
-    pdf.output(filename)
-    return filename
-# -- FIM DA FUNÇÃO DE GERAÇÃO DE PDF APRIMORADA --
+# --- ROTAS DE AUTENTICAÇÃO E DASHBOARD ---
+@app.route('/')
+def index():
+    return redirect(url_for('login'))
 
-
-# Rotas e lógica (atualizadas para incluir os novos campos de valor e peças)
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    if 'usuario_id' in session and 'permissao' in session: # Se já logado, redireciona
-        if session['permissao'] == 'cliente':
-            return redirect(url_for('cliente_dashboard'))
-        else:
-            return redirect(url_for('dashboard'))
-
     if request.method == 'POST':
-        login_input = request.form['usuario']
-        senha_input = request.form['senha']
+        login_input = request.form['login']
+        senha = request.form['senha']
+
         conn = sqlite3.connect(DB)
         c = conn.cursor()
-        
-        # Tenta autenticar como usuário interno (admin, tecnico, atendente)
-        c.execute("SELECT id, nome, login, senha, permissao FROM usuarios WHERE login=?", (login_input,))
+        # Busca usuário interno ou cliente
+        c.execute("SELECT id, nome, login, senha, permissao, id_cliente FROM usuarios WHERE login = ?", (login_input,))
         usuario = c.fetchone()
-        if usuario and check_password_hash(usuario[3], senha_input):
+        conn.close()
+
+        if usuario and check_password_hash(usuario[3], senha): # usuario[3] é a senha hashed
             session['usuario_id'] = usuario[0]
             session['usuario_nome'] = usuario[1]
+            session['login'] = usuario[2]
             session['permissao'] = usuario[4]
-            conn.close()
-            return redirect(url_for('dashboard'))
-        
-        # Tenta autenticar como cliente web
-        c.execute("SELECT cw.id, cw.id_cliente, c.nome, cw.senha FROM clientes_web cw JOIN clientes c ON cw.id_cliente = c.id WHERE cw.login=?", (login_input,))
-        cliente_web = c.fetchone()
-        if cliente_web and check_password_hash(cliente_web[3], senha_input):
-            session['usuario_id'] = cliente_web[0] # id do clientes_web
-            session['id_cliente_associado'] = cliente_web[1] # id da tabela clientes
-            session['usuario_nome'] = cliente_web[2] # nome do cliente
-            session['permissao'] = 'cliente'
-            conn.close()
-            return redirect(url_for('cliente_dashboard'))
-        
-        conn.close()
-        flash('Login inválido', 'danger')
+            session['id_cliente'] = usuario[5] # Armazena o id_cliente se for um cliente
+
+            if session['permissao'] == 'cliente':
+                flash('Login de cliente realizado com sucesso!', 'success')
+                return redirect(url_for('cliente_dashboard'))
+            else:
+                flash('Login de usuário interno realizado com sucesso!', 'success')
+                return redirect(url_for('dashboard'))
+        else:
+            flash('Login ou senha incorretos.', 'danger')
     return render_template('login.html')
+
 
 @app.route('/logout')
 def logout():
     session.clear()
+    flash('Você foi desconectado.', 'info')
     return redirect(url_for('login'))
 
 @app.route('/dashboard')
 def dashboard():
     if 'usuario_id' not in session or session['permissao'] == 'cliente':
-        flash('Acesso não autorizado.', 'danger')
+        flash('Você não tem permissão para acessar esta página.', 'danger')
         return redirect(url_for('login'))
-
+    
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-
     c.execute("SELECT COUNT(*) FROM ordens_servico")
     total_os = c.fetchone()[0]
-
-    c.execute("SELECT COUNT(*) FROM ordens_servico WHERE status = 'Aberta'")
+    c.execute("SELECT COUNT(*) FROM ordens_servico WHERE status='Aberta'")
     os_abertas = c.fetchone()[0]
-
-    c.execute("SELECT COUNT(*) FROM ordens_servico WHERE status = 'Em Análise'")
+    c.execute("SELECT COUNT(*) FROM ordens_servico WHERE status='Em Análise'")
     os_em_analise = c.fetchone()[0]
-
-    c.execute("SELECT COUNT(*) FROM ordens_servico WHERE status = 'Finalizada'")
+    c.execute("SELECT COUNT(*) FROM ordens_servico WHERE status='Finalizada'")
     os_finalizadas = c.fetchone()[0]
-
     conn.close()
 
-    return render_template('dashboard.html',
-                           usuario=session['usuario_nome'],
+    return render_template('dashboard.html', 
+                           usuario=session['usuario_nome'], 
                            permissao=session['permissao'],
                            total_os=total_os,
                            os_abertas=os_abertas,
                            os_em_analise=os_em_analise,
                            os_finalizadas=os_finalizadas)
 
-# --- NOVO: Dashboard para Clientes ---
 @app.route('/cliente_dashboard')
 def cliente_dashboard():
-    if 'usuario_id' not in session or session['permissao'] != 'cliente':
-        flash('Acesso não autorizado.', 'danger')
+    # Apenas clientes logados podem acessar este dashboard
+    if 'usuario_id' not in session or session.get('permissao') != 'cliente' or session.get('id_cliente') is None:
+        flash('Você precisa estar logado como cliente para acessar esta página.', 'danger')
         return redirect(url_for('login'))
 
-    id_cliente = session['id_cliente_associado']
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    # Seleciona as OS vinculadas a este id_cliente
+    # Pega todas as OSs associadas ao id_cliente do usuário logado
     c.execute("""
         SELECT 
-            os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
-            os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
-            os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
-            os.nome_aprovacao_cliente, os.data_aprovacao_cliente
-        FROM ordens_servico os
-        JOIN clientes c ON os.id_cliente = c.id
-        WHERE os.id_cliente = ? ORDER BY os.id DESC
-    """, (id_cliente,))
+            id, codigo_os, id_cliente, cliente, equipamento, numero_serie, itens_internos, 
+            defeito, solucao, status, data_entrada, responsavel, valor_orcamento,
+            valor_servico_executado, pecas_adicionadas, valor_pecas,
+            nome_aprovacao_cliente, data_aprovacao_cliente
+        FROM ordens_servico
+        WHERE id_cliente = ?
+        ORDER BY id DESC
+    """, (session['id_cliente'],))
     ordens = c.fetchall()
     conn.close()
 
-    return render_template('cliente_dashboard.html',
-                           usuario=session['usuario_nome'],
-                           ordens=ordens)
-# --- FIM DO NOVO: Dashboard para Clientes ---
+    return render_template('cliente_dashboard.html', usuario=session['usuario_nome'], ordens=ordens)
 
 
+# --- ROTAS DE GERENCIAMENTO DE USUÁRIOS INTERNOS ---
 @app.route('/cadastrar_usuario', methods=['GET', 'POST'])
 def cadastrar_usuario():
-    # Apenas admin pode cadastrar usuários internos
+    # Somente administradores podem cadastrar outros usuários internos
     if 'permissao' not in session or session['permissao'] != 'admin':
         flash('Você não tem permissão para acessar esta página.', 'warning')
         return redirect(url_for('dashboard'))
 
     if request.method == 'POST':
-        nome = request.form['nome']
-        login = request.form['login']
-        senha = request.form['senha']
-        permissao = request.form['permissao'] # 'admin', 'tecnico', 'atendente'
+        nome = request.form['nome'].strip()
+        login = request.form['login'].strip()
+        senha = request.form['senha'].strip()
+        permissao = request.form['permissao']
 
         if not nome or not login or not senha or not permissao:
             flash('Todos os campos são obrigatórios.', 'danger')
             return render_template('cadastrar_usuario.html')
 
+        hashed_password = generate_password_hash(senha, method='pbkdf2:sha256')
+
         conn = sqlite3.connect(DB)
         c = conn.cursor()
         try:
-            hashed_senha = generate_password_hash(senha)
             c.execute("INSERT INTO usuarios (nome, login, senha, permissao) VALUES (?, ?, ?, ?)",
-                      (nome, login, hashed_senha, permissao))
+                      (nome, login, hashed_password, permissao))
             conn.commit()
-            flash('Usuário interno cadastrado com sucesso!', 'success')
+            flash('Usuário cadastrado com sucesso!', 'success')
+            return redirect(url_for('listar_usuarios'))
         except sqlite3.IntegrityError:
-            flash('Erro: O login informado já existe. Por favor, escolha outro.', 'danger')
+            flash('Erro: Já existe um usuário com este login.', 'danger')
         except Exception as e:
             flash(f'Erro ao cadastrar usuário: {e}', 'danger')
         finally:
             conn.close()
     return render_template('cadastrar_usuario.html')
 
-@app.route('/editar_usuario/<int:usuario_id>', methods=['GET', 'POST'])
-def editar_usuario(usuario_id):
-    # Verifica se o usuário logado tem permissão para editar (ex: 'admin')
-    if 'usuario_id' not in session or session.get('permissao') != 'admin':
-        flash('Acesso negado. Você não tem permissão para editar usuários.', 'danger')
-        return redirect(url_for('dashboard')) # Ou para a página de login
-
-    conn = None
-    try:
-        conn = sqlite3.connect('seu_banco_de_dados.db') # Use o nome correto do seu DB
-        cursor = conn.cursor()
-
-        if request.method == 'POST':
-            # Processa os dados do formulário de edição
-            nome = request.form['nome']
-            login = request.form['login']
-            permissao = request.form['permissao']
-            senha_nova = request.form.get('senha_nova') # Senha é opcional na edição
-
-            # Verifica se o novo login já existe para outro usuário
-            cursor.execute("SELECT id FROM usuarios WHERE login = ? AND id != ?", (login, usuario_id))
-            if cursor.fetchone():
-                flash('Erro: O login informado já está em uso por outro usuário.', 'danger')
-                # Busca o usuário novamente para preencher o formulário com os dados atuais
-                cursor.execute("SELECT id, nome, login, permissao FROM usuarios WHERE id = ?", (usuario_id,))
-                usuario = cursor.fetchone()
-                return render_template('editar_usuario.html', usuario=usuario)
-
-            # Atualiza os dados do usuário
-            if senha_nova:
-                hashed_password = generate_password_hash(senha_nova, method='pbkdf2:sha256')
-                cursor.execute("UPDATE usuarios SET nome = ?, login = ?, senha = ?, permissao = ? WHERE id = ?",
-                               (nome, login, hashed_password, permissao, usuario_id))
-            else:
-                cursor.execute("UPDATE usuarios SET nome = ?, login = ?, permissao = ? WHERE id = ?",
-                               (nome, login, permissao, usuario_id))
-            conn.commit()
-            flash('Usuário atualizado com sucesso!', 'success')
-            return redirect(url_for('listar_usuarios')) # Redireciona para uma lista de usuários
-
-        else: # Método GET: Exibe o formulário com os dados atuais
-            cursor.execute("SELECT id, nome, login, permissao FROM usuarios WHERE id = ?", (usuario_id,))
-            usuario = cursor.fetchone() # Retorna uma tupla ou None
-
-            if usuario:
-                # Converte a tupla para um dicionário para facilitar o acesso no template
-                usuario_dict = {
-                    'id': usuario[0],
-                    'nome': usuario[1],
-                    'login': usuario[2],
-                    'permissao': usuario[3]
-                }
-                return render_template('editar_usuario.html', usuario=usuario_dict)
-            else:
-                flash('Usuário não encontrado.', 'danger')
-                return redirect(url_for('listar_usuarios')) # Ou para o dashboard
-
-    except sqlite3.Error as e:
-        if conn: conn.rollback()
-        flash(f'Ocorreu um erro no banco de dados: {e}', 'danger')
-    except Exception as e:
-        if conn: conn.rollback()
-        flash(f'Ocorreu um erro inesperado: {e}', 'danger')
-    finally:
-        if conn: conn.close()
-    
-    return redirect(url_for('dashboard')) # Em caso de erro grave, redireciona
-
-# Você também precisará de uma rota para listar usuários, se ainda não tiver
 @app.route('/listar_usuarios')
 def listar_usuarios():
-    if 'usuario_id' not in session or session.get('permissao') != 'admin':
-        flash('Acesso negado.', 'danger')
+    # Somente administradores podem listar usuários
+    if 'permissao' not in session or session['permissao'] != 'admin':
+        flash('Você não tem permissão para acessar esta página.', 'warning')
         return redirect(url_for('dashboard'))
-    
-    conn = sqlite3.connect('seu_banco_de_dados.db')
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, nome, login, permissao FROM usuarios")
-    usuarios = cursor.fetchall()
+
+    conn = sqlite3.connect(DB) # CORRIGIDO: Usando DB
+    c = conn.cursor()
+    # Não lista usuários com permissão 'cliente' aqui
+    c.execute("SELECT id, nome, login, permissao FROM usuarios WHERE permissao != 'cliente' ORDER BY nome")
+    # Para passar como dicionário (facilita acesso no template)
+    usuarios_db = c.fetchall()
+    usuarios = [
+        {'id': u[0], 'nome': u[1], 'login': u[2], 'permissao': u[3]}
+        for u in usuarios_db
+    ]
     conn.close()
     return render_template('listar_usuarios.html', usuarios=usuarios)
 
-# --- NOVO: Rotas de Gerenciamento de Clientes (para Admin/Atendente) ---
+@app.route('/editar_usuario/<int:usuario_id>', methods=['GET', 'POST'])
+def editar_usuario(usuario_id):
+    # Somente administradores podem editar usuários
+    if 'permissao' not in session or session['permissao'] != 'admin':
+        flash('Você não tem permissão para acessar esta página.', 'warning')
+        return redirect(url_for('dashboard'))
+
+    conn = sqlite3.connect(DB) # CORRIGIDO: Usando DB
+    c = conn.cursor()
+
+    if request.method == 'POST':
+        nome = request.form['nome'].strip()
+        login = request.form['login'].strip()
+        senha_nova = request.form['senha_nova'].strip()
+        permissao = request.form['permissao']
+
+        if not nome or not login or not permissao:
+            flash('Nome, Login e Permissão são campos obrigatórios.', 'danger')
+            # Re-seleciona o usuário para re-renderizar
+            c.execute("SELECT id, nome, login, permissao FROM usuarios WHERE id = ?", (usuario_id,))
+            usuario_info = c.fetchone()
+            conn.close()
+            return render_template('editar_usuario.html', usuario={'id': usuario_info[0], 'nome': usuario_info[1], 'login': usuario_info[2], 'permissao': usuario_info[3]})
+
+        try:
+            # Verifica se o novo login já existe para outro usuário
+            c.execute("SELECT id FROM usuarios WHERE login = ? AND id != ?", (login, usuario_id))
+            if c.fetchone():
+                flash('Erro: Já existe outro usuário com este login.', 'danger')
+                # Re-seleciona o usuário para re-renderizar
+                c.execute("SELECT id, nome, login, permissao FROM usuarios WHERE id = ?", (usuario_id,))
+                usuario_info = c.fetchone()
+                conn.close()
+                return render_template('editar_usuario.html', usuario={'id': usuario_info[0], 'nome': usuario_info[1], 'login': usuario_info[2], 'permissao': usuario_info[3]})
+
+            if senha_nova:
+                hashed_senha_nova = generate_password_hash(senha_nova, method='pbkdf2:sha256')
+                c.execute("UPDATE usuarios SET nome=?, login=?, senha=?, permissao=? WHERE id=?",
+                          (nome, login, hashed_senha_nova, permissao, usuario_id))
+            else:
+                c.execute("UPDATE usuarios SET nome=?, login=?, permissao=? WHERE id=?",
+                          (nome, login, permissao, usuario_id))
+            conn.commit()
+            flash('Usuário atualizado com sucesso!', 'success')
+            return redirect(url_for('listar_usuarios'))
+        except Exception as e:
+            flash(f'Erro ao atualizar usuário: {e}', 'danger')
+        finally:
+            conn.close()
+            
+    else: # Método GET
+        c.execute("SELECT id, nome, login, permissao FROM usuarios WHERE id = ?", (usuario_id,))
+        usuario_info = c.fetchone()
+        conn.close()
+        if not usuario_info:
+            flash("Usuário não encontrado.", 'danger')
+            return redirect(url_for('listar_usuarios'))
+        
+        usuario = {
+            'id': usuario_info[0],
+            'nome': usuario_info[1],
+            'login': usuario_info[2],
+            'permissao': usuario_info[3]
+        }
+        return render_template('editar_usuario.html', usuario=usuario)
+from functools import wraps
+
+def login_required(*permissoes):
+    def decorator(f):
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            if 'usuario_id' not in session or (permissoes and session.get('permissao') not in permissoes):
+                flash('Você não tem permissão para acessar esta página.', 'danger')
+                return redirect(url_for('login'))
+            return f(*args, **kwargs)
+        return decorated_function
+    return decorator
+
+# Rota Excluir Usuário
+@app.route('/excluir_usuario/<int:usuario_id>', methods=['POST'])
+@login_required('admin')
+def excluir_usuario(usuario_id):
+    conn = sqlite3.connect('assistencia.db')
+    cursor = conn.cursor()
+    try:
+        # Verifica se o usuário a ser excluído não é o próprio usuário logado
+        if session.get('usuario_id') == usuario_id:
+            flash('Você não pode excluir seu próprio usuário enquanto estiver logado.', 'danger')
+            return redirect(url_for('listar_usuarios'))
+
+        # Primeiro, verifica se o usuário existe
+        cursor.execute("SELECT id, nome FROM usuarios WHERE id = ?", (usuario_id,))
+        usuario_db = cursor.fetchone()
+
+        if usuario_db:
+            # Se o usuário for um cliente com acesso web, o id_cliente será nulo nesta tabela.
+            # A exclusão aqui é apenas do registro na tabela 'usuarios'.
+            # A tabela 'clientes' e as ordens de serviço associadas ao cliente não são afetadas.
+            cursor.execute("DELETE FROM usuarios WHERE id = ?", (usuario_id,))
+            conn.commit()
+            flash(f'Usuário "{usuario_db[1]}" excluído com sucesso!', 'success')
+        else:
+            flash('Usuário não encontrado.', 'danger')
+    except Exception as e:
+        conn.rollback()
+        flash(f'Erro ao excluir usuário: {e}', 'danger')
+    finally:
+        conn.close()
+    return redirect(url_for('listar_usuarios'))
+
+# --- ROTAS DE GERENCIAMENTO DE CLIENTES ---
 @app.route('/cadastrar_cliente', methods=['GET', 'POST'])
 def cadastrar_cliente():
     if 'permissao' not in session or session['permissao'] not in ['admin', 'atendente']:
@@ -486,23 +458,51 @@ def cadastrar_cliente():
         nome = request.form['nome'].strip()
         cpf = request.form['cpf'].strip()
         telefone = request.form['telefone'].strip()
+        
+        criar_acesso_web = request.form.get('criar_acesso_web')
+        login_web = request.form.get('login_web', '').strip()
+        senha_web = request.form.get('senha_web', '').strip()
 
         if not nome or not cpf:
-            flash('Nome e CPF são campos obrigatórios.', 'danger')
+            flash('Nome e CPF são campos obrigatórios para o cliente.', 'danger')
             return render_template('cadastrar_cliente.html')
-        
+
         conn = sqlite3.connect(DB)
         c = conn.cursor()
         try:
+            # Insere o cliente na tabela 'clientes'
             c.execute("INSERT INTO clientes (nome, cpf, telefone) VALUES (?, ?, ?)",
                       (nome, cpf, telefone))
+            
+            cliente_id = c.lastrowid # Pega o ID do cliente recém-criado
+            
+            # Se for para criar acesso web, insere na tabela 'usuarios'
+            if criar_acesso_web:
+                if not login_web or not senha_web:
+                    flash('Login e Senha para o acesso web são obrigatórios ao marcar "Criar Acesso Web".', 'danger')
+                    conn.rollback() # Desfaz a inserção do cliente
+                    return render_template('cadastrar_cliente.html')
+                
+                hashed_senha_web = generate_password_hash(senha_web, method='pbkdf2:sha256')
+                c.execute("INSERT INTO usuarios (nome, login, senha, permissao, id_cliente) VALUES (?, ?, ?, ?, ?)",
+                          (nome, login_web, hashed_senha_web, 'cliente', cliente_id))
+                flash(f'Acesso web criado para o cliente {nome} com login: {login_web}!', 'success')
+            
             conn.commit()
             flash('Cliente cadastrado com sucesso!', 'success')
-            return redirect(url_for('listar_clientes')) # Redireciona para a lista de clientes após o sucesso
-        except sqlite3.IntegrityError:
-            flash('Erro: Já existe um cliente com este CPF.', 'danger')
+            return redirect(url_for('listar_clientes'))
+
+        except sqlite3.IntegrityError as e:
+            if "UNIQUE constraint failed: clientes.cpf" in str(e):
+                flash('Erro: Já existe outro cliente com este CPF.', 'danger')
+            elif "UNIQUE constraint failed: usuarios.login" in str(e):
+                flash('Erro: Já existe um usuário com este login web. Escolha outro.', 'danger')
+            else:
+                flash(f'Erro de integridade ao cadastrar cliente: {e}', 'danger')
+            conn.rollback() # Garante que a transação seja desfeita em caso de erro
         except Exception as e:
-            flash(f'Erro ao cadastrar cliente: {e}', 'danger')
+            flash(f'Erro ao cadastrar cliente ou acesso web: {e}', 'danger')
+            conn.rollback()
         finally:
             conn.close()
     return render_template('cadastrar_cliente.html')
@@ -515,11 +515,16 @@ def listar_clientes():
 
     conn = sqlite3.connect(DB)
     c = conn.cursor()
-    # Junta com clientes_web para verificar se o cliente tem acesso web
+    # Junta com usuarios para verificar se o cliente tem acesso web
     c.execute("""
-        SELECT c.id, c.nome, c.cpf, c.telefone, cw.login IS NOT NULL AS tem_acesso_web
+        SELECT 
+            c.id, 
+            c.nome, 
+            c.cpf, 
+            c.telefone, 
+            u.id IS NOT NULL AS tem_acesso_web 
         FROM clientes c
-        LEFT JOIN clientes_web cw ON c.id = cw.id_cliente
+        LEFT JOIN usuarios u ON c.id = u.id_cliente AND u.permissao = 'cliente'
         ORDER BY c.nome
     """)
     clientes = c.fetchall()
@@ -540,8 +545,7 @@ def editar_cliente(id):
         cpf = request.form['cpf'].strip()
         telefone = request.form['telefone'].strip()
         
-        # Lógica para criação/edição de acesso web para o cliente
-        criar_acesso_web = request.form.get('criar_acesso_web')
+        criar_acesso_web = request.form.get('criar_acesso_web') # Checkbox para criar/manter acesso
         login_web = request.form.get('login_web', '').strip()
         senha_web = request.form.get('senha_web', '').strip()
         
@@ -550,11 +554,12 @@ def editar_cliente(id):
             # Busca novamente os dados para re-renderizar
             c.execute("SELECT id, nome, cpf, telefone FROM clientes WHERE id=?", (id,))
             cliente_info = c.fetchone()
-            c.execute("SELECT login FROM clientes_web WHERE id_cliente=?", (id,))
+            c.execute("SELECT login FROM usuarios WHERE id_cliente=? AND permissao='cliente'", (id,))
             cliente_web_info = c.fetchone()
             conn.close()
-            return render_template('editar_cliente.html', cliente=cliente_info, cliente_web_login=cliente_web_info[0] if cliente_web_info else None)
-
+            return render_template('editar_cliente.html', cliente=cliente_info, 
+                                   cliente_web_login=cliente_web_info[0] if cliente_web_info else None,
+                                   permissao=session['permissao'])
 
         try:
             # Atualiza dados do cliente
@@ -563,29 +568,65 @@ def editar_cliente(id):
             conn.commit()
             flash('Dados do cliente atualizados com sucesso!', 'success')
 
-            # Lógica para acesso web
-            c.execute("SELECT id FROM clientes_web WHERE id_cliente=?", (id,))
+            # Lógica para acesso web na tabela usuarios
+            c.execute("SELECT id, login FROM usuarios WHERE id_cliente=? AND permissao='cliente'", (id,))
             acesso_web_existente = c.fetchone()
 
-            if criar_acesso_web and not acesso_web_existente:
-                if not login_web or not senha_web:
-                    flash('Login e Senha para o acesso web são obrigatórios.', 'danger')
-                else:
-                    hashed_senha_web = generate_password_hash(senha_web)
-                    c.execute("INSERT INTO clientes_web (id_cliente, login, senha) VALUES (?, ?, ?)",
-                              (id, login_web, hashed_senha_web))
-                    conn.commit()
-                    flash(f'Acesso web criado para o cliente {nome} com login: {login_web}!', 'success')
-            elif criar_acesso_web and acesso_web_existente:
-                 flash('Este cliente já possui acesso web. Desmarque "Criar Acesso Web" se quiser apenas editar os dados do cliente.', 'info')
-            elif not criar_acesso_web and acesso_web_existente and (login_web or senha_web): # Se desmarcou mas tentou mudar dados
-                 flash('Acesso web existente. Para criar novo acesso, exclua o existente primeiro (funcionalidade futura).', 'info')
+            if criar_acesso_web: # Se o checkbox "Criar Acesso Web" está marcado
+                if not acesso_web_existente: # E não existe um acesso web para este cliente
+                    if not login_web or not senha_web:
+                        flash('Login e Senha para o acesso web são obrigatórios para criar um novo acesso.', 'danger')
+                    else:
+                        hashed_senha_web = generate_password_hash(senha_web, method='pbkdf2:sha256')
+                        c.execute("INSERT INTO usuarios (nome, login, senha, permissao, id_cliente) VALUES (?, ?, ?, ?, ?)",
+                                  (nome, login_web, hashed_senha_web, 'cliente', id))
+                        conn.commit()
+                        flash(f'Acesso web criado para o cliente {nome} com login: {login_web}!', 'success')
+                else: # Já existe um acesso web, então tenta atualizar (se houver dados novos)
+                    update_login = False
+                    update_senha = False
+                    if login_web and login_web != acesso_web_existente[1]: # Se o login foi fornecido e é diferente
+                        update_login = True
+                    if senha_web: # Se uma nova senha foi fornecida
+                        update_senha = True
+                    
+                    if update_login and update_senha:
+                        hashed_senha_web = generate_password_hash(senha_web, method='pbkdf2:sha256')
+                        c.execute("UPDATE usuarios SET login=?, senha=? WHERE id=?",
+                                  (login_web, hashed_senha_web, acesso_web_existente[0]))
+                        conn.commit()
+                        flash('Login e senha do acesso web atualizados!', 'success')
+                    elif update_login:
+                        c.execute("UPDATE usuarios SET login=? WHERE id=?",
+                                  (login_web, acesso_web_existente[0]))
+                        conn.commit()
+                        flash('Login do acesso web atualizado!', 'success')
+                    elif update_senha:
+                        hashed_senha_web = generate_password_hash(senha_web, method='pbkdf2:sha256')
+                        c.execute("UPDATE usuarios SET senha=? WHERE id=?",
+                                  (hashed_senha_web, acesso_web_existente[0]))
+                        conn.commit()
+                        flash('Senha do acesso web atualizada!', 'success')
+                    elif login_web == acesso_web_existente[1] and not senha_web:
+                        flash('Nenhuma alteração detectada no acesso web.', 'info')
+                    elif login_web and login_web != acesso_web_existente[1] and not update_senha:
+                        flash('Erro: Já existe um usuário com este novo login web. Escolha outro.', 'danger')
 
+            else: # Se o checkbox "Criar Acesso Web" NÃO está marcado
+                if acesso_web_existente and (login_web or senha_web): # Se desmarcou mas tentou mudar dados
+                    flash('Acesso web existente. Para editar, marque a opção "Criar/Editar Acesso Web". Para excluir, a funcionalidade ainda não está disponível.', 'info')
 
-        except sqlite3.IntegrityError:
-            flash('Erro: Já existe outro cliente com este CPF.', 'danger')
+        except sqlite3.IntegrityError as e:
+            if "UNIQUE constraint failed: clientes.cpf" in str(e):
+                flash('Erro: Já existe outro cliente com este CPF.', 'danger')
+            elif "UNIQUE constraint failed: usuarios.login" in str(e):
+                flash('Erro: Já existe um usuário com este login web. Escolha outro.', 'danger')
+            else:
+                 flash(f'Erro de integridade: {e}', 'danger')
+            conn.rollback() # Garante que a transação seja desfeita em caso de erro
         except Exception as e:
-            flash(f'Erro ao atualizar cliente ou criar acesso web: {e}', 'danger')
+            flash(f'Erro ao atualizar cliente ou acesso web: {e}', 'danger')
+            conn.rollback()
         finally:
             conn.close()
             # Redireciona para evitar reenvio do form e atualiza a página
@@ -599,7 +640,8 @@ def editar_cliente(id):
             flash("Cliente não encontrado.", 'danger')
             return redirect(url_for('listar_clientes'))
         
-        c.execute("SELECT login FROM clientes_web WHERE id_cliente=?", (id,))
+        # Busca o login web do cliente na tabela 'usuarios'
+        c.execute("SELECT login FROM usuarios WHERE id_cliente=? AND permissao='cliente'", (id,))
         cliente_web_info = c.fetchone()
         conn.close()
 
@@ -607,21 +649,17 @@ def editar_cliente(id):
                                cliente=cliente_info, 
                                cliente_web_login=cliente_web_info[0] if cliente_web_info else None,
                                permissao=session['permissao']) # Passa permissao para o template
+
 @app.route('/alterar_senha_cliente', methods=['GET', 'POST'])
 def alterar_senha_cliente():
-    # Verifica se o usuário está logado e se é um 'cliente' (ou qualquer permissão que você defina para clientes)
+    # Verifica se o usuário está logado
     if 'usuario_id' not in session:
         flash('Você precisa estar logado para alterar sua senha.', 'danger')
         return redirect(url_for('login'))
     
-    # Opcional: Se você quiser que apenas clientes com a permissão 'cliente' possam usar esta rota
-    # if session.get('permissao') != 'cliente':
-    #     flash('Acesso negado. Esta função é apenas para clientes.', 'danger')
-    #     return redirect(url_for('dashboard'))
-
     conn = None
     try:
-        conn = sqlite3.connect('seu_banco_de_dados.db') # Use o nome correto do seu DB
+        conn = sqlite3.connect(DB) # CORRIGIDO: Usando DB
         cursor = conn.cursor()
 
         if request.method == 'POST':
@@ -657,10 +695,15 @@ def alterar_senha_cliente():
             # 5. Gerar hash da nova senha e atualizar no DB
             hashed_nova_senha = generate_password_hash(nova_senha, method='pbkdf2:sha256')
             cursor.execute("UPDATE usuarios SET senha = ? WHERE id = ?",
-                           (hashed_nova_senha, session['usuario_id']))
+                            (hashed_nova_senha, session['usuario_id']))
             conn.commit()
             flash('Sua senha foi alterada com sucesso!', 'success')
-            return redirect(url_for('dashboard')) # Redireciona para o dashboard após a alteração
+            
+            # Redireciona para o dashboard apropriado após a alteração
+            if session.get('permissao') == 'cliente':
+                return redirect(url_for('cliente_dashboard'))
+            else:
+                return redirect(url_for('dashboard'))
 
         else: # Método GET: Exibe o formulário
             return render_template('alterar_senha_cliente.html')
@@ -674,9 +717,55 @@ def alterar_senha_cliente():
     finally:
         if conn: conn.close()
     
-    return redirect(url_for('dashboard')) # Em caso de erro grave, redireciona
+    # Em caso de erro grave, redireciona para o dashboard (ou login se não estiver logado)
+    if 'permissao' in session and session['permissao'] == 'cliente':
+        return redirect(url_for('cliente_dashboard'))
+    elif 'permissao' in session:
+        return redirect(url_for('dashboard'))
+    else:
+        return redirect(url_for('login'))
+
+# Rota Excluir Cliente
+@app.route('/excluir_cliente/<int:cliente_id>', methods=['POST'])
+@login_required('admin', 'atendente')
+def excluir_cliente(cliente_id):
+    conn = sqlite3.connect('assistencia.db')
+    cursor = conn.cursor()
+    try:
+        # 1. Verificar se o cliente existe
+        cursor.execute("SELECT nome FROM clientes WHERE id = ?", (cliente_id,))
+        cliente_db = cursor.fetchone()
+        if not cliente_db:
+            flash('Cliente não encontrado.', 'danger')
+            return redirect(url_for('listar_clientes'))
+
+        cliente_nome = cliente_db[0]
+
+        # 2. Verificar se o cliente tem ordens de serviço associadas
+        cursor.execute("SELECT COUNT(*) FROM ordens_servico WHERE id_cliente = ?", (cliente_id,))
+        count_os = cursor.fetchone()[0]
+
+        if count_os > 0:
+            flash(f'Não é possível excluir o cliente "{cliente_nome}" porque ele possui {count_os} ordem(ns) de serviço associada(s). Remova ou reassocie as OSs primeiro.', 'danger')
+            return redirect(url_for('listar_clientes'))
+
+        # 3. Se não houver OSs, remover o acesso web do cliente (se existir)
+        cursor.execute("DELETE FROM usuarios WHERE id_cliente = ? AND permissao = 'cliente'", (cliente_id,))
+
+        # 4. Excluir o cliente da tabela 'clientes'
+        cursor.execute("DELETE FROM clientes WHERE id = ?", (cliente_id,))
+        conn.commit()
+
+        flash(f'Cliente "{cliente_nome}" e seu acesso web (se existia) excluídos com sucesso!', 'success')
+
+    except Exception as e:
+        conn.rollback()
+        flash(f'Erro ao excluir cliente: {e}', 'danger')
+    finally:
+        conn.close()
+    return redirect(url_for('listar_clientes'))
     
-# --- FIM DO NOVO: Rotas de Gerenciamento de Clientes ---
+# --- ROTAS DE GERENCIAMENTO DE ORDENS DE SERVIÇO ---
 
 @app.route('/nova_os', methods=['GET', 'POST'])
 def nova_os():
@@ -692,7 +781,7 @@ def nova_os():
     conn.close()
 
     if request.method == 'POST':
-        id_cliente = request.form['id_cliente'] # NOVO: Pega o ID do cliente selecionado
+        id_cliente = request.form['id_cliente']
         equipamento = request.form['equipamento']
         numero_serie = request.form['numero_serie']
         itens = request.form['itens']
@@ -833,11 +922,11 @@ def editar_os(id):
             return render_template('editar_os.html', os=os_info, usuario=session['usuario_nome'])
 
 
-        # NOVO: Seleciona todos os campos existentes e os novos para atualização
+        # Seleciona todos os campos existentes e os novos para atualização
         # NOTA: nome_aprovacao_cliente e data_aprovacao_cliente NÃO são atualizados aqui,
         # apenas pela rota de aprovação pública.
         c.execute("UPDATE ordens_servico SET solucao=?, status=?, valor_orcamento=?, valor_servico_executado=?, pecas_adicionadas=?, valor_pecas=? WHERE id=?", 
-                  (solucao, status, valor_orcamento, valor_servico_executado, pecas_adicionadas, valor_pecas, id))
+                    (solucao, status, valor_orcamento, valor_servico_executado, pecas_adicionadas, valor_pecas, id))
         conn.commit()
         
         # Re-seleciona a OS para pegar o valor atualizado e gerar o PDF
@@ -880,7 +969,7 @@ def editar_os(id):
         flash("OS atualizada com sucesso!", 'success')
         return redirect(url_for('listar_os'))
     else:
-        # NOVO: Seleciona todos os campos, incluindo os de peças e aprovação, e dados do cliente
+        # Seleciona todos os campos, incluindo os de peças e aprovação, e dados do cliente
         c.execute("""
             SELECT 
                 os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
@@ -948,13 +1037,14 @@ def visualizar_os_publica(codigo_os):
         data_aprovacao = datetime.now().strftime("%d/%m/%Y %H:%M")
 
         try:
-            c.execute("UPDATE ordens_servico SET nome_aprovacao_cliente=?, data_aprovacao_cliente=? WHERE codigo_os=?", 
+            c.execute("UPDATE ordens_servico SET nome_aprovacao_cliente=?, data_aprovacao_cliente=?, status='Aprovada pelo Cliente' WHERE codigo_os=?", 
                       (nome_aprovacao, data_aprovacao, codigo_os))
             conn.commit()
 
             # Atualiza os_dados para refletir a aprovação imediatamente na tela
             os_dados['nome_aprovacao_cliente'] = nome_aprovacao
             os_dados['data_aprovacao_cliente'] = data_aprovacao
+            os_dados['status'] = 'Aprovada pelo Cliente' # Atualiza o status para o PDF
 
             # Regera o PDF para incluir a informação de aprovação
             gerar_pdf_os(os_dados)
@@ -970,8 +1060,6 @@ def visualizar_os_publica(codigo_os):
     
     conn.close()
     return render_template('visualizar_os_publica.html', os=os_dados)
-# --- FIM DA ROTA PÚBLICA ---
-
 
 if __name__ == '__main__':
     inicializar_banco()

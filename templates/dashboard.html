@@ -49,9 +49,13 @@
         ⚙️ Cadastrar Usuário Interno
       </a>
     </div>
+    <div class="col-md-4"> {# NOVO BOTÃO AQUI #}
+      <a href="{{ url_for('listar_usuarios') }}" class="btn btn-dark w-100 py-3">
+        ⚙️ Gerenciar Usuários
+      </a>
+    </div>
     {% endif %}
 
-    {# NOVO: Botões para gerenciar clientes #}
     {% if permissao == 'admin' or permissao == 'atendente' %}
     <div class="col-md-4">
       <a href="{{ url_for('cadastrar_cliente') }}" class="btn btn-warning w-100 py-3">

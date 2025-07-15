@@ -52,10 +52,10 @@
         Este cliente já possui acesso web com o login: <strong>{{ cliente_web_login }}</strong>.
         Para alterar a senha, um recurso futuro seria necessário.
       </div>
-      <button type="submit" class="btn btn-primary">Atualizar Dados do Cliente</button>
+      <button type="submit" class="btn btn-primary mt-3">Atualizar Dados do Cliente</button>
     {% else %}
       <div class="form-check mb-3">
-        <input class="form-check-input" type="checkbox" id="criar_acesso_web" name="criar_acesso_web">
+        <input class="form-check-input" type="checkbox" id="criar_acesso_web" name="criar_acesso_web" {% if form_data and form_data.criar_acesso_web %}checked{% endif %}>
         <label class="form-check-label" for="criar_acesso_web">
           Criar Acesso Web para este Cliente
         </label>
@@ -64,16 +64,16 @@
       <div id="campos_acesso_web" style="display: none;">
         <div class="mb-3">
           <label for="login_web" class="form-label">Login para Acesso Web (*)</label>
-          <input type="text" class="form-control" id="login_web" name="login_web">
+          <input type="text" class="form-control" id="login_web" name="login_web" value="{{ form_data.login_web if form_data else '' }}">
           <small class="form-text text-muted">O login será usado pelo cliente para acessar o sistema.</small>
         </div>
         <div class="mb-3">
           <label for="senha_web" class="form-label">Senha para Acesso Web (*)</label>
-          <input type="password" class="form-control" id="senha_web" name="senha_web">
+          <input type="password" class="form-control" id="senha_web" name="senha_web" value="{{ form_data.senha_web if form_data else '' }}">
           <small class="form-text text-muted">Forneça esta senha ao cliente.</small>
         </div>
       </div>
-      <button type="submit" class="btn btn-primary">Salvar Alterações</button>
+      <button type="submit" class="btn btn-primary mt-3">Salvar Alterações</button>
     {% endif %}
 
   </form>
@@ -84,21 +84,28 @@
   document.addEventListener('DOMContentLoaded', function() {
     const checkbox = document.getElementById('criar_acesso_web');
     const camposAcessoWeb = document.getElementById('campos_acesso_web');
+    const loginWebInput = document.getElementById('login_web');
+    const senhaWebInput = document.getElementById('senha_web');
 
-    if (checkbox) { // Garante que o checkbox existe (não existe se o cliente já tem acesso web)
-      checkbox.addEventListener('change', function() {
-        if (checkbox.checked) {
-          camposAcessoWeb.style.display = 'block';
-          // Se criar, torna campos de login/senha obrigatórios
-          document.getElementById('login_web').setAttribute('required', 'required');
-          document.getElementById('senha_web').setAttribute('required', 'required');
-        } else {
-          camposAcessoWeb.style.display = 'none';
-          // Remove a obrigatoriedade se desmarcar
-          document.getElementById('login_web').removeAttribute('required');
-          document.getElementById('senha_web').removeAttribute('required');
-        }
-      });
+    // Função para atualizar a visibilidade e a obrigatoriedade
+    function updateAcessoWebFields() {
+      if (checkbox && checkbox.checked) {
+        camposAcessoWeb.style.display = 'block';
+        loginWebInput.setAttribute('required', 'required');
+        senhaWebInput.setAttribute('required', 'required');
+      } else {
+        camposAcessoWeb.style.display = 'none';
+        loginWebInput.removeAttribute('required');
+        senhaWebInput.removeAttribute('required');
+      }
+    }
+
+    // Chama a função ao carregar a página (útil se o checkbox vier marcado do backend)
+    updateAcessoWebFields();
+
+    // Adiciona listener para mudanças no checkbox
+    if (checkbox) {
+      checkbox.addEventListener('change', updateAcessoWebFields);
     }
   });
 </script>

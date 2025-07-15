@@ -4,62 +4,56 @@
   <meta charset="UTF-8">
   <title>Lista de Ordens de Serviço</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    .status-Aberta { color: white; background-color: #ffc107; padding: 4px 8px; border-radius: 5px; }
-    .status-Finalizada { color: white; background-color: #198754; padding: 4px 8px; border-radius: 5px; }
-    .status-Em\ Análise { color: white; background-color: #0d6efd; padding: 4px 8px; border-radius: 5px; }
-  </style>
 </head>
 <body class="bg-light">
 
 <nav class="navbar navbar-dark bg-dark">
   <div class="container-fluid">
-    <span class="navbar-brand">Lista de OS</span>
+    <span class="navbar-brand">Ordem de Serviço - Lista</span>
     <div class="d-flex">
       <span class="navbar-text text-white me-3">Usuário: {{ usuario }}</span>
-      <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm me-2">Dashboard</a>
+      <a href="{{ url_for('nova_os') }}" class="btn btn-outline-light btn-sm me-2">Nova OS</a>
       <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
     </div>
   </div>
 </nav>
 
-<div class="container mt-5">
-  <h3 class="mb-4">Ordens de Serviço</h3>
-  {% if ordens %}
-  <div class="table-responsive">
-    <table class="table table-bordered table-striped align-middle">
-      <thead class="table-dark">
-        <tr>
-          <th>Código OS</th>
-          <th>Cliente</th>
-          <th>Equipamento</th>
-          <th>Status</th>
-          <th>Entrada</th>
-          <th>Responsável</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for os in ordens %}
-        <tr>
-          <td>{{ os[1] }}</td>
-          <td>{{ os[2] }}</td>
-          <td>{{ os[4] }}</td>
-          <td><span class="status-{{ os[10] }}">{{ os[10] }}</span></td>
-          <td>{{ os[11] }}</td>
-          <td>{{ os[12] }}</td>
-          <td>
-            <a href="#" class="btn btn-sm btn-outline-primary disabled">Editar</a>
-            <a href="#" class="btn btn-sm btn-outline-success disabled">Finalizar</a>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% else %}
-  <p class="text-muted">Nenhuma OS cadastrada até o momento.</p>
-  {% endif %}
+<div class="container py-5">
+  <h3 class="mb-4">Ordens de Serviço Registradas</h3>
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      <div class="alert alert-info">{{ messages[0] }}</div>
+    {% endif %}
+  {% endwith %}
+  <table class="table table-striped">
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>OS</th>
+        <th>Cliente</th>
+        <th>Equipamento</th>
+        <th>Status</th>
+        <th>Data</th>
+        <th>Ações</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for os in ordens %}
+      <tr>
+        <td>{{ os[0] }}</td>
+        <td>{{ os[1] }}</td>
+        <td>{{ os[2] }}</td>
+        <td>{{ os[4] }}</td>
+        <td>{{ os[9] }}</td>
+        <td>{{ os[10] }}</td>
+        <td>
+          <a href="{{ url_for('editar_os', id=os[0]) }}" class="btn btn-sm btn-warning">Editar</a>
+          <a href="{{ url_for('ver_pdf_os', codigo_os=os[1]) }}" class="btn btn-sm btn-primary">Visualizar OS</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 </body>

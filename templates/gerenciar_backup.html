@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Gerenciar Backup - Sistema OS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+  <div class="container-fluid">
+    <a class="navbar-brand" href="{{ url_for('dashboard') }}">Sistema OS</a>
+    <div class="d-flex">
+      <span class="navbar-text text-white me-3">Usuário: {{ session['usuario_nome'] }} ({{ session['permissao'].capitalize() }})</span>
+      <a href="{{ url_for('dashboard') }}" class="btn btn-outline-light btn-sm me-2">Voltar ao Painel</a>
+      <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm">Sair</a>
+    </div>
+  </div>
+</nav>
+
+<div class="container py-5">
+  <h2 class="mb-4">Gerenciar Backup do Banco de Dados</h2>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="alert alert-{{ category }} mt-2">
+          {{ message }}
+          {% if 'sucesso' in message and 'em:' in message %}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+          {% endif %}
+        </div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="card mt-4">
+    <div class="card-body">
+      <h5 class="card-title">Realizar Backup Local no Servidor</h5>
+      <p class="card-text">Insira o caminho completo do diretório onde deseja salvar o backup no **servidor**. Certifique-se de que o sistema tem permissão de escrita neste diretório.</p>
+      <form method="POST" action="{{ url_for('gerenciar_backup') }}">
+        <div class="mb-3">
+          <label for="backup_dir" class="form-label">Caminho do Diretório de Backup no Servidor:</label>
+          <input type="text" class="form-control" id="backup_dir" name="backup_dir" placeholder="Ex: C:\BackupsOS ou /home/usuario/backups" value="{{ last_backup_dir }}" required>
+          <small class="form-text text-muted">Exemplo: `C:\BackupsOS` (Windows) ou `/home/usuario/meus_backups` (Linux/macOS)</small>
+        </div>
+        <button type="submit" class="btn btn-primary">Fazer Backup no Servidor</button>
+      </form>
+      
+      <hr class="my-4">
+
+      <h5 class="card-title">Baixar Backup para seu Computador</h5>
+      <p class="card-text">Clique no botão abaixo para baixar uma cópia do banco de dados atual diretamente para o seu computador. O navegador perguntará onde você deseja salvar o arquivo.</p>
+      <a href="{{ url_for('baixar_backup_db') }}" class="btn btn-success">
+        ⬇️ Baixar Backup do Banco de Dados
+      </a>
+    </div>
+  </div>
+
+  {# SEÇÃO PARA RESTAURAR BACKUP (AGORA COM LISTA DE BACKUPS) #}
+  <div class="card mt-4 border-danger">
+    <div class="card-body">
+      <h5 class="card-title text-danger">⚠️ Restaurar Backup do Banco de Dados</h5>
+      <p class="card-text">
+        **ATENÇÃO:** A restauração de um backup irá **sobrescrever** o banco de dados atual. Todas as informações adicionadas ou alteradas desde o backup serão **perdidas**.
+        <br>
+        **Recomendado:** Faça um backup do seu banco de dados atual antes de restaurar e **reinicie o servidor Flask após a restauração**.
+        <br>
+        Selecione um backup existente no servidor ou forneça o caminho completo para um arquivo `.db` se ele não estiver na lista.
+      </p>
+      <form method="POST" action="{{ url_for('restaurar_backup') }}" onsubmit="return confirm('ATENÇÃO: Tem certeza que deseja RESTAURAR o banco de dados? Isso sobrescreverá o banco de dados atual e perderá dados recentes. Recomendado reiniciar o servidor após. Esta ação é IRREVERSÍVEL!');">
+        <div class="mb-3">
+          <label for="chosen_backup_filename" class="form-label">Escolher Backup Existente no Servidor:</label>
+          <select class="form-select" id="chosen_backup_filename" name="chosen_backup_filename">
+            {% if available_backups %}
+              <option value="">-- Selecione um backup --</option>
+              {% for backup in available_backups %}
+                <option value="{{ backup.filename }}">{{ backup.date }} ({{ backup.filename }})</option>
+              {% endfor %}
+            {% else %}
+              <option value="">Nenhum backup encontrado no servidor.</option>
+            {% endif %}
+          </select>
+          <small class="form-text text-muted">Apenas backups salvos no diretório `{{ BACKUP_DIR }}` serão listados.</small>
+        </div>
+        
+        {# Este campo agora é opcional se o dropdown for usado, ou pode ser uma alternativa #}
+        {# Para simplificar e evitar conflito de requied, vamos manter o dropdown como principal. #}
+        {# Se o usuário precisar de um caminho fora do BACKUP_DIR, teria que editar a URL da rota ou adicionar outro campo para isso #}
+        
+        <button type="submit" class="btn btn-danger">Restaurar Backup</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="alert alert-info mt-4" role="alert">
+    **Importante sobre backups na nuvem:** A integração direta com serviços como Google Drive é complexa e exige configuração de APIs e autenticação OAuth 2.0. Isso não pode ser feito apenas com um "link" e está além do escopo de uma implementação simples no momento. Considere usar soluções de sincronização de pastas externas para mover backups locais para a nuvem.
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

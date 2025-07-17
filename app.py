@@ -1,9 +1,13 @@
 import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
+from flask import send_file
 from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import uuid
+import shutil
 from datetime import datetime
+from functools import wraps
+import hashlib
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
@@ -15,6 +19,31 @@ app = Flask(__name__)
 app.secret_key = 'aB3c#D5e@F7g$H9i!J1k%L2m^N4o&P6q*R8s+T0u=VwXyZ' # Mude para uma chave secreta forte e aleatória
 DB = 'assistencia.db'
 PDF_DIR = 'static/os_pdfs' # Diretório para salvar os PDFs
+
+BACKUP_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'server_backups')
+# Garante que o diretório de backup exista ao iniciar a aplicação
+os.makedirs(BACKUP_DIR, exist_ok=True)
+
+
+# Função auxiliar para listar backups disponíveis no servidor
+def get_available_server_backups():
+    backups = []
+    if os.path.exists(BACKUP_DIR):
+        for filename in os.listdir(BACKUP_DIR):
+            if filename.startswith('assistencia_backup_') and filename.endswith('.db'):
+                filepath = os.path.join(BACKUP_DIR, filename)
+                # O timestamp está no nome do arquivo: assistencia_backup_YYYYMMDD_HHMMSS.db
+                try:
+                    # Extrair a parte do timestamp e formatar para algo legível
+                    timestamp_str = filename.replace('assistencia_backup_', '').replace('.db', '')
+                    backup_date = datetime.strptime(timestamp_str, '%Y%m%d_%H%M%S').strftime('%d/%m/%Y %H:%M:%S')
+                    backups.append({'filename': filename, 'date': backup_date, 'filepath': filepath})
+                except ValueError:
+                    # Ignorar arquivos que não seguem o padrão de nome esperado
+                    pass
+    # Opcional: ordenar por data mais recente
+    backups.sort(key=lambda x: datetime.strptime(x['date'], '%d/%m/%Y %H:%M:%S'), reverse=True)
+    return backups
 
 # Garante que o diretório de PDFs exista
 if not os.path.exists(PDF_DIR):
@@ -86,7 +115,7 @@ def inicializar_banco():
     # Cria um usuário admin padrão se não houver nenhum
     c.execute("SELECT COUNT(*) FROM usuarios WHERE permissao='admin'")
     if c.fetchone()[0] == 0:
-        hashed_password = generate_password_hash('admin', method='pbkdf2:sha256')
+        hashed_password = generate_password_hash('05022013', method='pbkdf2:sha256')
         c.execute("INSERT INTO usuarios (nome, login, senha, permissao) VALUES (?, ?, ?, ?)",
                   ('Administrador', 'admin', hashed_password, 'admin'))
         conn.commit()
@@ -185,7 +214,6 @@ def gerar_pdf_os(os_dados):
 
     # Build the PDF
     doc.build(elements)
-
 
 # --- ROTAS DE AUTENTICAÇÃO E DASHBOARD ---
 @app.route('/')
@@ -1060,6 +1088,113 @@ def visualizar_os_publica(codigo_os):
     
     conn.close()
     return render_template('visualizar_os_publica.html', os=os_dados)
+
+# Rota para Download do Banco de Dados como Backup
+@app.route('/baixar_backup_db')
+@login_required('admin')
+def baixar_backup_db():
+    db_path = 'assistencia.db' # Caminho do seu banco de dados ativo
+
+    if not os.path.exists(db_path):
+        flash('Arquivo do banco de dados não encontrado no servidor.', 'danger')
+        return redirect(url_for('gerenciar_backup'))
+
+    try:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        download_filename = f'assistencia_db_backup_{timestamp}.db'
+
+        return send_file(db_path, as_attachment=True, download_name=download_filename, mimetype='application/x-sqlite3')
+    except Exception as e:
+        flash(f'Erro ao preparar o download do backup: {e}', 'danger')
+        return redirect(url_for('gerenciar_backup'))
+
+# Rota para Gerenciar Backups (apenas para Admin) - AGORA ENVIA A LISTA DE BACKUPS
+@app.route('/gerenciar_backup', methods=['GET', 'POST'])
+@login_required('admin')
+def gerenciar_backup():
+    if request.method == 'POST':
+        backup_dir = request.form.get('backup_dir')
+        if not backup_dir:
+            flash('Por favor, forneça um diretório para o backup.', 'danger')
+            return redirect(url_for('gerenciar_backup'))
+
+        # Tentar criar o diretório se não existir
+        try:
+            os.makedirs(backup_dir, exist_ok=True)
+        except OSError as e:
+            flash(f'Erro ao criar o diretório de backup: {e}', 'danger')
+            # Retorna para a página com a lista de backups atualizada
+            return render_template('gerenciar_backup.html', 
+                                   last_backup_dir=backup_dir, 
+                                   available_backups=get_available_server_backups())
+
+        db_path = 'assistencia.db' 
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        # Use o BACKUP_DIR configurado para salvar o backup
+        backup_filename = f'assistencia_backup_{timestamp}.db'
+        backup_filepath = os.path.join(BACKUP_DIR, backup_filename) # Salva no BACKUP_DIR definido
+        
+        try:
+            shutil.copy2(db_path, backup_filepath)
+            flash(f'Backup do banco de dados realizado com sucesso em: {backup_filepath}', 'success')
+        except Exception as e:
+            flash(f'Erro ao realizar o backup: {e}', 'danger')
+        
+        # Retorna para a página com a lista de backups atualizada
+        return render_template('gerenciar_backup.html', 
+                               last_backup_dir=backup_dir, 
+                               available_backups=get_available_server_backups())
+
+    # GET request: Carrega e exibe a lista de backups
+    available_backups = get_available_server_backups()
+    return render_template('gerenciar_backup.html', last_backup_dir='', available_backups=available_backups)
+
+
+# Rota para Restaurar Backup (apenas para Admin) - AGORA RECEBE UM ARQUIVO DA LISTA
+@app.route('/restaurar_backup', methods=['POST'])
+@login_required('admin')
+def restaurar_backup():
+    # O valor enviado do formulário será o nome do arquivo de backup (filename)
+    chosen_backup_filename = request.form.get('chosen_backup_filename') 
+    
+    if not chosen_backup_filename:
+        flash('Por favor, selecione um arquivo de backup para restaurar.', 'danger')
+        return redirect(url_for('gerenciar_backup'))
+
+    backup_file_path = os.path.join(BACKUP_DIR, chosen_backup_filename)
+
+    if not os.path.exists(backup_file_path):
+        flash('Arquivo de backup não encontrado no caminho especificado no servidor.', 'danger')
+        return redirect(url_for('gerenciar_backup'))
+
+    # Verifica se o arquivo é um .db para segurança extra, embora a listagem já deva garantir isso
+    if not backup_file_path.endswith('.db'):
+        flash('O arquivo selecionado não é um arquivo de banco de dados válido (.db).', 'danger')
+        return redirect(url_for('gerenciar_backup'))
+
+    db_path = 'assistencia.db' # Caminho do seu banco de dados ativo
+
+    try:
+        # **PASSO CRÍTICO**: Fechar todas as conexões existentes antes de substituir o arquivo
+        # Em uma aplicação Flask simples, isso pode ser feito garantindo que o SQLite
+        # não esteja com conexões abertas no momento do shutil.copy2
+        # Idealmente, a aplicação seria reiniciada após esta operação.
+
+        # Criar um backup de segurança do DB atual antes de restaurar
+        timestamp_prev = datetime.now().strftime('%Y%m%d_%H%M%S')
+        temp_backup_filename = f'assistencia_PRE_RESTAURACAO_{timestamp_prev}.db'
+        temp_backup_filepath = os.path.join(os.path.dirname(db_path), temp_backup_filename)
+        
+        shutil.copy2(db_path, temp_backup_filepath)
+        flash(f'Backup de segurança do banco de dados atual criado em: {temp_backup_filepath}', 'info')
+
+        # Realizar a restauração
+        shutil.copy2(backup_file_path, db_path)
+        flash('Banco de dados restaurado com sucesso! É ALTAMENTE RECOMENDADO REINICIAR O SERVIDOR DO FLASK AGORA.', 'success')
+    except Exception as e:
+        flash(f'Erro ao restaurar o backup: {e}. Certifique-se de que o arquivo não está em uso e o caminho está correto.', 'danger')
+    
+    return redirect(url_for('gerenciar_backup'))
 
 if __name__ == '__main__':
     inicializar_banco()

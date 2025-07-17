@@ -49,7 +49,7 @@
         ⚙️ Cadastrar Usuário Interno
       </a>
     </div>
-    <div class="col-md-4"> {# NOVO BOTÃO AQUI #}
+    <div class="col-md-4">
       <a href="{{ url_for('listar_usuarios') }}" class="btn btn-dark w-100 py-3">
         ⚙️ Gerenciar Usuários
       </a>
@@ -65,6 +65,15 @@
     <div class="col-md-4">
       <a href="{{ url_for('listar_clientes') }}" class="btn btn-secondary w-100 py-3">
         👥 Gerenciar Clientes
+      </a>
+    </div>
+    {% endif %}
+
+    {# NOVO BOTÃO PARA GERENCIAR BACKUP - APENAS ADMIN #}
+    {% if permissao == 'admin' %}
+    <div class="col-md-4">
+      <a href="{{ url_for('gerenciar_backup') }}" class="btn btn-warning w-100 py-3">
+        💾 Gerenciar Backup
       </a>
     </div>
     {% endif %}

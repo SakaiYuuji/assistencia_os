@@ -1,29 +1,35 @@
-import sqlite3
-from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
-from flask import send_file
-from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import uuid
-import shutil
-from datetime import datetime
-from functools import wraps
 import hashlib
+import shutil
+import sqlite3
+from functools import wraps
+from datetime import datetime
+from flask import Flask, render_template, request, redirect, url_for, flash, session, send_file
+from werkzeug.security import generate_password_hash, check_password_hash
+
+# Importações do ReportLab para um estilo mais profissional
 from reportlab.lib.pagesizes import A4
-from reportlab.pdfgen import canvas
-from reportlab.lib import colors
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.units import cm
+from reportlab.pdfgen import canvas
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle, StyleSheet1
+from reportlab.lib import colors
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+from reportlab.lib.utils import ImageReader # Para logos, se houver
 
 app = Flask(__name__)
 app.secret_key = 'aB3c#D5e@F7g$H9i!J1k%L2m^N4o&P6q*R8s+T0u=VwXyZ' # Mude para uma chave secreta forte e aleatória
 DB = 'assistencia.db'
-PDF_DIR = 'static/os_pdfs' # Diretório para salvar os PDFs
+PDF_DIR = 'PDFs'  # Diretório para salvar os PDFs
+
+# Certifique-se de que o diretório de PDFs exista ao iniciar a aplicação
+if not os.path.exists(PDF_DIR):
+    os.makedirs(PDF_DIR)
 
 BACKUP_DIR = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'server_backups')
 # Garante que o diretório de backup exista ao iniciar a aplicação
 os.makedirs(BACKUP_DIR, exist_ok=True)
-
 
 # Função auxiliar para listar backups disponíveis no servidor
 def get_available_server_backups():
@@ -125,95 +131,534 @@ def inicializar_banco():
 
 def gerar_pdf_os(os_dados):
     pdf_file_path = os.path.join(PDF_DIR, f"{os_dados['codigo_os']}.pdf")
-    c = canvas.Canvas(pdf_file_path, pagesize=A4)
-    width, height = A4
+    os.makedirs(os.path.dirname(pdf_file_path), exist_ok=True)
 
+    # 1. Configurar a folha de estilos
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='Title', fontSize=18, spaceAfter=14, alignment=1)) # Center alignment
-    styles.add(ParagraphStyle(name='Heading2', fontSize=14, spaceAfter=8, textColor=colors.darkblue))
-    styles.add(ParagraphStyle(name='BodyText', fontSize=10, spaceAfter=6))
-    styles.add(ParagraphStyle(name='SmallText', fontSize=8, spaceAfter=4))
-    styles.add(ParagraphStyle(name='BoldBodyText', fontSize=10, fontName='Helvetica-Bold', spaceAfter=6))
+    # Crie uma nova folha de estilos vazia para seus estilos personalizados
+    # Isso garante que não haverá conflitos de nomes de estilo
+    custom_styles = StyleSheet1()
 
-    # Title
-    c.setFont('Helvetica-Bold', 24)
-    c.drawCentredString(width / 2.0, height - 50, "Ordem de Serviço")
+    # Adicione estilos personalizados
+    custom_styles.add(ParagraphStyle(name='Title', fontSize=24, spaceAfter=20, alignment=TA_CENTER, fontName='Helvetica-Bold'))
+    custom_styles.add(ParagraphStyle(name='Subtitle', fontSize=16, spaceAfter=10, alignment=TA_CENTER, fontName='Helvetica-Bold', textColor=colors.darkblue))
+    custom_styles.add(ParagraphStyle(name='Heading1', fontSize=14, spaceBefore=12, spaceAfter=6, fontName='Helvetica-Bold', textColor=colors.darkblue))
+    custom_styles.add(ParagraphStyle(name='BodyText', fontSize=10, spaceAfter=4, fontName='Helvetica'))
+    custom_styles.add(ParagraphStyle(name='BodyTextBold', fontSize=10, spaceAfter=4, fontName='Helvetica-Bold'))
+    custom_styles.add(ParagraphStyle(name='SmallText', fontSize=8, spaceAfter=2, fontName='Helvetica'))
+    custom_styles.add(ParagraphStyle(name='SignatureLine', fontSize=10, spaceBefore=30, alignment=TA_CENTER, fontName='Helvetica'))
+    custom_styles.add(ParagraphStyle(name='SignatureText', fontSize=10, spaceAfter=10, alignment=TA_CENTER, fontName='Helvetica'))
+    
+    # Novo estilo para cabeçalhos de seção com fundo sombreado
+    custom_styles.add(ParagraphStyle(name='SectionHeader', fontSize=12, spaceBefore=10, spaceAfter=5, fontName='Helvetica-Bold', textColor=colors.black, alignment=TA_LEFT))
 
-    # Company Info (adjust as needed)
-    c.setFont('Helvetica', 9)
-    c.drawString(cm, height - 80, "Sua Empresa de Assistência Técnica")
-    c.drawString(cm, height - 90, "Endereço: Rua Principal, 123 - Cidade - Estado")
-    c.drawString(cm, height - 100, "Telefone: (XX) XXXX-XXXX | E-mail: contato@empresa.com")
-    c.line(cm, height - 105, width - cm, height - 105)
+
+    # 2. Configurar o SimpleDocTemplate
+    doc = SimpleDocTemplate(pdf_file_path, pagesize=A4,
+                            rightMargin=cm, leftMargin=cm,
+                            topMargin=3.0*cm, bottomMargin=2.5*cm) # Margens ajustadas para o novo cabeçalho
 
     elements = []
 
-    # Basic OS Info & Client Info
-    elements.append(Paragraph(f"<font size=12><b>CÓDIGO OS: {os_dados['codigo_os']}</b></font>", styles['BodyText']))
-    elements.append(Paragraph(f"<b>Data de Entrada:</b> {os_dados['data_entrada']}", styles['BodyText']))
-    elements.append(Paragraph(f"<b>Responsável (Abertura):</b> {os_dados['responsavel']}", styles['BodyText']))
-    elements.append(Spacer(1, 0.2*cm))
+    # --- Função para Cabeçalho e Rodapé ---
+    def header_footer(canvas_obj, doc_obj):
+        canvas_obj.saveState()
+        
+        # Header - Título principal "Ordem de Serviço"
+        canvas_obj.setFont('Helvetica-Bold', 24)
+        canvas_obj.drawCentredString(A4[0]/2.0, A4[1] - 1.5*cm, "Ordem de Serviço") # Ajustado para centralizar
 
-    elements.append(Paragraph("<b>DADOS DO CLIENTE:</b>", styles['Heading2']))
-    elements.append(Paragraph(f"<b>Nome:</b> {os_dados['cliente']}", styles['BodyText']))
-    elements.append(Paragraph(f"<b>Telefone:</b> {os_dados['telefone'] or 'N/A'}", styles['BodyText']))
-    elements.append(Spacer(1, 0.4*cm))
+        # Código da OS abaixo do título principal
+        canvas_obj.setFont('Helvetica-Bold', 12)
+        canvas_obj.drawCentredString(A4[0]/2.0, A4[1] - 2.2*cm, f"OS: {os_dados['codigo_os']}") # Ajustado para centralizar e menor
 
-    # Equipment Info
-    elements.append(Paragraph("<b>DADOS DO EQUIPAMENTO:</b>", styles['Heading2']))
-    elements.append(Paragraph(f"<b>Equipamento:</b> {os_dados['equipamento']}", styles['BodyText']))
-    elements.append(Paragraph(f"<b>Número de Série:</b> {os_dados['numero_serie']}", styles['BodyText']))
-    elements.append(Paragraph(f"<b>Itens/Acessórios Internos:</b> {os_dados['itens_internos']}", styles['BodyText']))
-    elements.append(Paragraph(f"<b>Defeito Relatado:</b> {os_dados['defeito']}", styles['BodyText']))
-    elements.append(Spacer(1, 0.4*cm))
+        # Linha divisória
+        line_y_position = A4[1] - 2.8*cm 
+        canvas_obj.line(cm, line_y_position, A4[0] - cm, line_y_position) 
 
-    # Service Details (only if OS is being edited/finalized)
-    if os_dados.get('solucao'):
-        elements.append(Paragraph("<b>DETALHES DO SERVIÇO:</b>", styles['Heading2']))
-        elements.append(Paragraph(f"<b>Solução Aplicada:</b> {os_dados['solucao']}", styles['BodyText']))
-        elements.append(Paragraph(f"<b>Status Atual:</b> {os_dados['status']}", styles['BodyText']))
-        if os_dados.get('pecas_adicionadas'):
-            elements.append(Paragraph(f"<b>Peças Adicionadas:</b> {os_dados['pecas_adicionadas']}", styles['BodyText']))
-            elements.append(Paragraph(f"<b>Valor das Peças:</b> R$ {os_dados['valor_pecas']:.2f}", styles['BodyText']))
-        elements.append(Spacer(1, 0.4*cm))
+        # Footer
+        canvas_obj.setFont('Helvetica', 8)
+        canvas_obj.drawCentredString(A4[0]/2.0, cm, f"Página {doc_obj.page}")
+        canvas_obj.restoreState()
 
-    # Financial Summary
-    elements.append(Paragraph("<b>RESUMO FINANCEIRO:</b>", styles['Heading2']))
-    elements.append(Paragraph(f"<b>Valor Orçado:</b> R$ {os_dados['valor_orcamento']:.2f}", styles['BoldBodyText']))
-    
+    # --- Conteúdo do Documento (Flowables) ---
+
+    # Espaçamento inicial para o conteúdo não colidir com o cabeçalho fixo
+    elements.append(Spacer(1, 3.0*cm)) # Deve ser igual ao topMargin do SimpleDocTemplate
+
+    # Informações da Empresa (movidas para o corpo do documento)
+    elements.append(Paragraph("<b>Sua Empresa de Assistência Técnica</b>", custom_styles['BodyTextBold']))
+    elements.append(Paragraph("Endereço: Rua Principal, 123 - Cidade - Estado", custom_styles['BodyText']))
+    elements.append(Paragraph("Telefone: (XX) XXXX-XXXX | E-mail: contato@empresa.com", custom_styles['BodyText']))
+    elements.append(Spacer(1, 0.8*cm)) # Espaço após as informações da empresa
+
+    # Informações Básicas da OS
+    data_os_info = [
+        [Paragraph("<b>Data de Entrada:</b>", custom_styles['BodyTextBold']), Paragraph(os_dados['data_entrada'], custom_styles['BodyText'])],
+        [Paragraph("<b>Responsável (Abertura):</b>", custom_styles['BodyTextBold']), Paragraph(os_dados['responsavel'], custom_styles['BodyText'])]
+    ]
+    table_style_basic = TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+    ])
+    elements.append(Table(data_os_info, colWidths=[4*cm, None], style=table_style_basic))
+    elements.append(Spacer(1, 0.5*cm))
+
+    # Dados do Cliente
+    # Cabeçalho de seção sombreado
+    elements.append(Table([[Paragraph("Dados do Cliente", custom_styles['SectionHeader'])]],
+                          colWidths=[A4[0]-2*cm],
+                          style=TableStyle([
+                              ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                              ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
+                              ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                              ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                              ('LEFTPADDING', (0,0), (-1,-1), 5),
+                              ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                              ('TOPPADDING', (0,0), (-1,-1), 2),
+                              ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                          ])))
+    data_cliente = [
+        [Paragraph("<b>Nome:</b>", custom_styles['BodyTextBold']), Paragraph(os_dados['cliente'], custom_styles['BodyText'])],
+        [Paragraph("<b>Telefone:</b>", custom_styles['BodyTextBold']), Paragraph(os_dados['telefone'] or 'N/A', custom_styles['BodyText'])]
+    ]
+    table_style_cliente = TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+    ])
+    elements.append(Table(data_cliente, colWidths=[4*cm, None], style=table_style_cliente))
+    elements.append(Spacer(1, 0.5*cm))
+
+    # Dados do Equipamento
+    elements.append(Table([[Paragraph("Dados do Equipamento", custom_styles['SectionHeader'])]],
+                          colWidths=[A4[0]-2*cm],
+                          style=TableStyle([
+                              ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                              ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
+                              ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                              ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                              ('LEFTPADDING', (0,0), (-1,-1), 5),
+                              ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                              ('TOPPADDING', (0,0), (-1,-1), 2),
+                              ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                          ])))
+    data_equipamento = [
+        [Paragraph("<b>Equipamento:</b>", custom_styles['BodyTextBold']), Paragraph(os_dados['equipamento'], custom_styles['BodyText'])],
+        [Paragraph("<b>Número de Série:</b>", custom_styles['BodyTextBold']), Paragraph(os_dados['numero_serie'], custom_styles['BodyText'])],
+    ]
+    table_style_equipamento = TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+    ])
+    elements.append(Table(data_equipamento, colWidths=[5*cm, None], style=table_style_equipamento))
+    elements.append(Spacer(1, 0.5*cm))
+
+    # Itens Internos (com borda)
+    elements.append(Table([[Paragraph("Itens Internos", custom_styles['SectionHeader'])]],
+                          colWidths=[A4[0]-2*cm],
+                          style=TableStyle([
+                              ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                              ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
+                              ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                              ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                              ('LEFTPADDING', (0,0), (-1,-1), 5),
+                              ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                              ('TOPPADDING', (0,0), (-1,-1), 2),
+                              ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                          ])))
+    elements.append(Table([[Paragraph(os_dados['itens_internos'], custom_styles['BodyText'])]],
+                          colWidths=[A4[0]-2*cm],
+                          style=TableStyle([
+                              ('GRID', (0,0), (-1,-1), 0.5, colors.black), # Adiciona borda
+                              ('LEFTPADDING', (0,0), (-1,-1), 5),
+                              ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                              ('TOPPADDING', (0,0), (-1,-1), 5),
+                              ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+                          ])))
+    elements.append(Spacer(1, 0.5*cm))
+
+    # Defeito Relatado (com borda)
+    elements.append(Table([[Paragraph("Defeito Relatado", custom_styles['SectionHeader'])]],
+                          colWidths=[A4[0]-2*cm],
+                          style=TableStyle([
+                              ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                              ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
+                              ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                              ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                              ('LEFTPADDING', (0,0), (-1,-1), 5),
+                              ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                              ('TOPPADDING', (0,0), (-1,-1), 2),
+                              ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                          ])))
+    elements.append(Table([[Paragraph(os_dados['defeito'], custom_styles['BodyText'])]],
+                          colWidths=[A4[0]-2*cm],
+                          style=TableStyle([
+                              ('GRID', (0,0), (-1,-1), 0.5, colors.black), # Adiciona borda
+                              ('LEFTPADDING', (0,0), (-1,-1), 5),
+                              ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                              ('TOPPADDING', (0,0), (-1,-1), 5),
+                              ('BOTTOMPADDING', (0,0), (-1,-1), 5),
+                          ])))
+    elements.append(Spacer(1, 0.5*cm))
+
+    # Resumo Financeiro - Título "Valores"
+    elements.append(Table([[Paragraph("Valores", custom_styles['SectionHeader'])]],
+                          colWidths=[A4[0]-2*cm],
+                          style=TableStyle([
+                              ('BACKGROUND', (0,0), (-1,-1), colors.lightgrey),
+                              ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
+                              ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                              ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                              ('LEFTPADDING', (0,0), (-1,-1), 5),
+                              ('RIGHTPADDING', (0,0), (-1,-1), 5),
+                              ('TOPPADDING', (0,0), (-1,-1), 2),
+                              ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+                          ])))
+    data_financeiro = [
+        [Paragraph("<b>Valor Orçado:</b>", custom_styles['BodyTextBold']), Paragraph(f"R$ {os_dados['valor_orcamento']:.2f}", custom_styles['BodyTextBold'])]
+    ]
     valor_total_final = os_dados.get('valor_servico_executado', 0.0) + os_dados.get('valor_pecas', 0.0)
     if os_dados.get('valor_servico_executado') is not None and os_dados.get('valor_servico_executado') > 0:
-        elements.append(Paragraph(f"<b>Valor do Serviço Executado:</b> R$ {os_dados['valor_servico_executado']:.2f}", styles['BodyText']))
-        elements.append(Paragraph(f"<b>Valor Total Estimado/Final:</b> R$ {valor_total_final:.2f}", styles['BoldBodyText']))
-
+        data_financeiro.append([Paragraph("<b>Valor do Serviço Executado:</b>", custom_styles['BodyTextBold']), Paragraph(f"R$ {os_dados['valor_servico_executado']:.2f}", custom_styles['BodyText'])])
+        data_financeiro.append([Paragraph("<b>Valor Total Estimado/Final:</b>", custom_styles['BodyTextBold']), Paragraph(f"R$ {valor_total_final:.2f}", custom_styles['BodyTextBold'])])
+    
+    table_style_financeiro = TableStyle([
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+        ('VALIGN', (0,0), (-1,-1), 'TOP'),
+        ('LEFTPADDING', (0,0), (-1,-1), 0),
+        ('RIGHTPADDING', (0,0), (-1,-1), 0),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+        ('LINEBELOW', (0,-1), (-1,-1), 0.5, colors.black), # Linha abaixo do total
+    ])
+    elements.append(Table(data_financeiro, colWidths=[6*cm, None], style=table_style_financeiro))
     elements.append(Spacer(1, 0.8*cm))
 
-    # Approval Section
-    elements.append(Paragraph("<b>APROVAÇÃO DO CLIENTE:</b>", styles['Heading2']))
-    if os_dados.get('nome_aprovacao_cliente'):
-        elements.append(Paragraph(f"<b>Aprovado por:</b> {os_dados['nome_aprovacao_cliente']}", styles['BodyText']))
-        elements.append(Paragraph(f"<b>Data da Aprovação:</b> {os_dados['data_aprovacao_cliente']}", styles['BodyText']))
-    else:
-        elements.append(Paragraph("Aguardando aprovação do cliente.", styles['BodyText']))
-    elements.append(Spacer(1, 1.5*cm)) # More space for signature
+    # Aprovação do Cliente - Removido para corresponder à imagem, que só tem a linha de assinatura
+    # elements.append(Paragraph("APROVAÇÃO DO CLIENTE:", custom_styles['Heading1']))
+    # if os_dados.get('nome_aprovacao_cliente'):
+    #     elements.append(Paragraph(f"<b>Aprovado por:</b> {os_dados['nome_aprovacao_cliente']}", custom_styles['BodyText']))
+    #     elements.append(Paragraph(f"<b>Data da Aprovação:</b> {os_dados['data_aprovacao_cliente']}", custom_styles['BodyText']))
+    # else:
+    #     elements.append(Paragraph("Aguardando aprovação do cliente.", custom_styles['BodyText']))
+    # elements.append(Spacer(1, 1.5*cm)) # Mais espaço para assinatura
 
-    elements.append(Paragraph("_______________________________________", styles['BodyText']))
-    elements.append(Paragraph("Assinatura do Cliente", styles['BodyText']))
+    # Linhas de Assinatura
+    elements.append(Spacer(1, 2.0*cm)) # Espaço antes da assinatura
+    elements.append(Paragraph("_______________________________________", custom_styles['SignatureLine']))
+    elements.append(Paragraph("Assinatura do Cliente", custom_styles['SignatureText']))
     elements.append(Spacer(1, 0.5*cm))
-    elements.append(Paragraph("_______________________________________", styles['BodyText']))
-    elements.append(Paragraph("Assinatura do Responsável (Técnico/Atendente)", styles['BodyText']))
+    # elements.append(Paragraph("_______________________________________", custom_styles['SignatureLine']))
+    # elements.append(Paragraph("Assinatura do Responsável (Técnico/Atendente)", custom_styles['SignatureText'])) # Removido para corresponder à imagem
 
-    # Flowables positioning
-    from reportlab.platypus import SimpleDocTemplate
-    doc = SimpleDocTemplate(pdf_file_path, pagesize=A4,
-                            rightMargin=cm, leftMargin=cm,
-                            topMargin=height - 110, bottomMargin=cm) # Adjust top margin to avoid overlap with header
+    # Construir o PDF com o cabeçalho/rodapé
+    doc.build(elements, onFirstPage=header_footer, onLaterPages=header_footer)
+
+    return pdf_file_path
+
+# --- Rotas do Flask (restante do seu código, inalterado) ---
+
+@app.route('/nova_os', methods=['GET', 'POST'])
+def nova_os():
+    if 'usuario_id' not in session or session['permissao'] == 'cliente':
+        flash('Você não tem permissão para acessar esta página.', 'danger')
+        return redirect(url_for('login'))
     
-    # Manually place header elements outside of SimpleDocTemplate flowables
-    # This section is already drawn by c.drawString and c.drawCentredString at the beginning.
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    # Busca clientes para o dropdown
+    c.execute("SELECT id, nome, cpf FROM clientes ORDER BY nome")
+    clientes_cadastrados = c.fetchall()
+    conn.close()
 
-    # Build the PDF
-    doc.build(elements)
+    if request.method == 'POST':
+        id_cliente = request.form['id_cliente']
+        equipamento = request.form['equipamento']
+        numero_serie = request.form['numero_serie']
+        itens = request.form['itens']
+        defeito = request.form['defeito']
+        responsavel = session['usuario_nome']
+        data_entrada = datetime.now().strftime("%d/%m/%Y %H:%M")
+        valor_orcamento_str = request.form['valor_orcamento'].replace(',', '.') 
+
+        if not id_cliente or not equipamento or not numero_serie or not itens or not defeito or not valor_orcamento_str:
+            flash('Todos os campos com (*) são obrigatórios.', 'danger')
+            return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
+
+        try:
+            valor_orcamento = float(valor_orcamento_str)
+        except ValueError:
+            flash('O campo "Valor do Orçamento" deve ser um número válido.', 'danger')
+            return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
+
+        codigo_os = f"OS-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
+        conn = sqlite3.connect(DB)
+        c = conn.cursor()
+        try:
+            # Pega nome e telefone do cliente selecionado
+            c.execute("SELECT nome, telefone FROM clientes WHERE id=?", (id_cliente,))
+            cliente_info = c.fetchone()
+            cliente_nome = cliente_info[0]
+            cliente_telefone = cliente_info[1]
+
+            # Inclui id_cliente na inserção
+            c.execute('''INSERT INTO ordens_servico
+                (codigo_os, id_cliente, cliente, telefone, equipamento, numero_serie, itens_internos, defeito, data_entrada, responsavel, valor_orcamento, pecas_adicionadas, valor_pecas, nome_aprovacao_cliente, data_aprovacao_cliente)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (codigo_os, id_cliente, cliente_nome, cliente_telefone, equipamento, numero_serie, itens, defeito, data_entrada, responsavel, valor_orcamento, '', 0.0, '', ''))
+            conn.commit()
+
+            os_dados = { # Usa cliente_nome e cliente_telefone do DB para PDF
+                'codigo_os': codigo_os,
+                'cliente': cliente_nome, 
+                'telefone': cliente_telefone,
+                'equipamento': equipamento,
+                'numero_serie': numero_serie,
+                'itens_internos': itens,
+                'defeito': defeito,
+                'data_entrada': data_entrada,
+                'responsavel': responsavel,
+                'valor_orcamento': valor_orcamento,
+                'valor_servico_executado': 0.0,
+                'pecas_adicionadas': '',
+                'valor_pecas': 0.0,
+                'nome_aprovacao_cliente': '',
+                'data_aprovacao_cliente': ''
+            }
+            gerar_pdf_os(os_dados)
+            flash(f"OS **{codigo_os}** criada com sucesso! <a href='{url_for('ver_pdf_os', codigo_os=codigo_os)}' class='btn btn-sm btn-primary ms-3' target='_blank'>Visualizar/Imprimir OS</a>", 'success')
+            return redirect(url_for('nova_os'))
+
+        except Exception as e:
+            flash(f'Erro ao criar OS: {e}', 'danger')
+        finally:
+            conn.close()
+    return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
+
+@app.route('/listar_os')
+def listar_os():
+    if 'usuario_id' not in session or session['permissao'] == 'cliente':
+        flash('Você não tem permissão para acessar esta página.', 'danger')
+        return redirect(url_for('login'))
+
+    filtro_cliente_nome = request.args.get('cliente', '').strip() # Filtra por nome do cliente
+    filtro_status = request.args.get('status', '').strip()
+
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+
+    query = """
+        SELECT 
+            os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+            os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+            os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+            os.nome_aprovacao_cliente, os.data_aprovacao_cliente
+        FROM ordens_servico os
+        JOIN clientes c ON os.id_cliente = c.id
+    """
+    params = []
+    condicoes = []
+    if filtro_cliente_nome:
+        condicoes.append("c.nome LIKE ?")
+        params.append(f"%{filtro_cliente_nome}%")
+    if filtro_status:
+        condicoes.append("os.status = ?")
+        params.append(filtro_status)
+    if condicoes:
+        query += " WHERE " + " AND ".join(condicoes)
+    query += " ORDER BY os.id DESC"
+
+    c.execute(query, params)
+    ordens = c.fetchall()
+    conn.close()
+    return render_template('listar_os.html', ordens=ordens, usuario=session['usuario_nome'], filtro_cliente=filtro_cliente_nome, filtro_status=filtro_status)
+
+
+@app.route('/editar_os/<int:id>', methods=['GET', 'POST'])
+def editar_os(id):
+    if 'usuario_id' not in session or session['permissao'] == 'cliente':
+        flash('Você não tem permissão para acessar esta página.', 'danger')
+        return redirect(url_for('login'))
+    
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    if request.method == 'POST':
+        solucao = request.form['solucao']
+        status = request.form['status']
+        valor_orcamento_str = request.form['valor_orcamento'].replace(',', '.') 
+        valor_servico_executado_str = request.form.get('valor_servico_executado', '0.0').replace(',', '.')
+        pecas_adicionadas = request.form.get('pecas_adicionadas', '').strip()
+        valor_pecas_str = request.form.get('valor_pecas', '0.0').replace(',', '.')
+        
+        try:
+            valor_orcamento = float(valor_orcamento_str)
+            valor_servico_executado = float(valor_servico_executado_str)
+            valor_pecas = float(valor_pecas_str)
+        except ValueError:
+            flash('Os campos de valor devem ser números válidos.', 'danger')
+            # Re-seleciona a OS para re-renderizar com dados atuais e a mensagem de erro
+            c.execute("""
+                SELECT 
+                    os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+                    os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+                    os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+                    os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
+                FROM ordens_servico os
+                JOIN clientes c ON os.id_cliente = c.id
+                WHERE os.id=?
+            """, (id,))
+            os_info = c.fetchone()
+            conn.close()
+            return render_template('editar_os.html', os=os_info, usuario=session['usuario_nome'])
+
+
+        # Seleciona todos os campos existentes e os novos para atualização
+        # NOTA: nome_aprovacao_cliente e data_aprovacao_cliente NÃO são atualizados aqui,
+        # apenas pela rota de aprovação pública.
+        c.execute("UPDATE ordens_servico SET solucao=?, status=?, valor_orcamento=?, valor_servico_executado=?, pecas_adicionadas=?, valor_pecas=? WHERE id=?", 
+                    (solucao, status, valor_orcamento, valor_servico_executado, pecas_adicionadas, valor_pecas, id))
+        conn.commit()
+        
+        # Re-seleciona a OS para pegar o valor atualizado e gerar o PDF
+        # Ajuste no SELECT para pegar as novas colunas e dados do cliente via JOIN
+        c.execute("""
+            SELECT 
+                os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+                os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+                os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+                os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
+            FROM ordens_servico os
+            JOIN clientes c ON os.id_cliente = c.id
+            WHERE os.id=?
+        """, (id,))
+        os_info = c.fetchone()
+        conn.close()
+
+        if os_info:
+            os_dados_atualizados = {
+                'codigo_os': os_info[1],
+                'cliente': os_info[2], # Nome do cliente do JOIN
+                'telefone': os_info[3], # Telefone do cliente do JOIN
+                'equipamento': os_info[4],
+                'numero_serie': os_info[5],
+                'itens_internos': os_info[6],
+                'defeito': os_info[7],
+                'solucao': os_info[8],
+                'status': os_info[9],
+                'data_entrada': os_info[10],
+                'responsavel': os_info[11],
+                'valor_orcamento': os_info[12],
+                'valor_servico_executado': os_info[13],
+                'pecas_adicionadas': os_info[14],
+                'valor_pecas': os_info[15],
+                'nome_aprovacao_cliente': os_info[16],
+                'data_aprovacao_cliente': os_info[17]
+            }
+            gerar_pdf_os(os_dados_atualizados)
+
+        flash("OS atualizada com sucesso!", 'success')
+        return redirect(url_for('listar_os'))
+    else:
+        # Seleciona todos os campos, incluindo os de peças e aprovação, e dados do cliente
+        c.execute("""
+            SELECT 
+                os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+                os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+                os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+                os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
+            FROM ordens_servico os
+            JOIN clientes c ON os.id_cliente = c.id
+            WHERE os.id=?
+        """, (id,))
+        os_info = c.fetchone()
+        conn.close()
+        if not os_info:
+            flash("OS não encontrada.", 'danger')
+            return redirect(url_for('listar_os'))
+        return render_template('editar_os.html', os=os_info, usuario=session['usuario_nome'])
+
+
+@app.route('/ver_pdf/<codigo_os>')
+def ver_pdf_os(codigo_os):
+    pdf_path = os.path.join(PDF_DIR, f"{codigo_os}.pdf")
+    if os.path.exists(pdf_path):
+        return send_file(pdf_path, as_attachment=False) # as_attachment=False para visualizar no navegador
+    else:
+        flash("PDF não encontrado.", 'danger')
+        return redirect(url_for('dashboard'))
+
+# --- ROTA PÚBLICA PARA VISUALIZAÇÃO E APROVAÇÃO DA OS PELO CLIENTE (Não logado) ---
+@app.route('/os_cliente/<codigo_os>', methods=['GET', 'POST'])
+def visualizar_os_publica(codigo_os):
+    conn = sqlite3.connect(DB)
+    c = conn.cursor()
+    # Pega todos os dados da OS, incluindo os campos de aprovação e dados do cliente
+    c.execute("""
+        SELECT 
+            os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
+            os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
+            os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
+            os.nome_aprovacao_cliente, os.data_aprovacao_cliente
+        FROM ordens_servico os
+        JOIN clientes c ON os.id_cliente = c.id
+        WHERE os.codigo_os=?
+    """, (codigo_os,))
+    os_info_tuple = c.fetchone()
+
+    if not os_info_tuple:
+        conn.close()
+        return "Ordem de Serviço não encontrada.", 404
+    
+    # Converte a tupla para dicionário para facilitar o acesso no template
+    os_fields = [
+        'id', 'codigo_os', 'cliente', 'telefone', 'equipamento', 'numero_serie',
+        'itens_internos', 'defeito', 'solucao', 'status', 'data_entrada', 'responsavel',
+        'valor_orcamento', 'valor_servico_executado', 'pecas_adicionadas', 'valor_pecas',
+        'nome_aprovacao_cliente', 'data_aprovacao_cliente'
+    ]
+    os_dados = dict(zip(os_fields, os_info_tuple))
+
+    if request.method == 'POST':
+        nome_aprovacao = request.form.get('nome_aprovacao_cliente', '').strip()
+        if not nome_aprovacao:
+            flash('Por favor, digite seu nome para aprovar a Ordem de Serviço.', 'danger')
+            return render_template('visualizar_os_publica.html', os=os_dados)
+        
+        data_aprovacao = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+        try:
+            c.execute("UPDATE ordens_servico SET nome_aprovacao_cliente=?, data_aprovacao_cliente=?, status='Aprovada pelo Cliente' WHERE codigo_os=?", 
+                      (nome_aprovacao, data_aprovacao, codigo_os))
+            conn.commit()
+
+            # Atualiza os_dados para refletir a aprovação imediatamente na tela
+            os_dados['nome_aprovacao_cliente'] = nome_aprovacao
+            os_dados['data_aprovacao_cliente'] = data_aprovacao
+            os_dados['status'] = 'Aprovada pelo Cliente' # Atualiza o status para o PDF
+
+            # Regera o PDF para incluir a informação de aprovação
+            gerar_pdf_os(os_dados)
+
+            flash('Ordem de Serviço aprovada com sucesso!', 'success')
+            
+        except Exception as e:
+            flash(f'Erro ao registrar aprovação: {e}', 'danger')
+        finally:
+            conn.close()
+            # Após o POST, renderiza a mesma página atualizada
+            return render_template('visualizar_os_publica.html', os=os_dados)
+    
+    conn.close()
+    return render_template('visualizar_os_publica.html', os=os_dados)
 
 # --- ROTAS DE AUTENTICAÇÃO E DASHBOARD ---
 @app.route('/')
@@ -792,302 +1237,6 @@ def excluir_cliente(cliente_id):
     finally:
         conn.close()
     return redirect(url_for('listar_clientes'))
-    
-# --- ROTAS DE GERENCIAMENTO DE ORDENS DE SERVIÇO ---
-
-@app.route('/nova_os', methods=['GET', 'POST'])
-def nova_os():
-    if 'usuario_id' not in session or session['permissao'] == 'cliente':
-        flash('Você não tem permissão para acessar esta página.', 'danger')
-        return redirect(url_for('login'))
-    
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    # Busca clientes para o dropdown
-    c.execute("SELECT id, nome, cpf FROM clientes ORDER BY nome")
-    clientes_cadastrados = c.fetchall()
-    conn.close()
-
-    if request.method == 'POST':
-        id_cliente = request.form['id_cliente']
-        equipamento = request.form['equipamento']
-        numero_serie = request.form['numero_serie']
-        itens = request.form['itens']
-        defeito = request.form['defeito']
-        responsavel = session['usuario_nome']
-        data_entrada = datetime.now().strftime("%d/%m/%Y %H:%M")
-        valor_orcamento_str = request.form['valor_orcamento'].replace(',', '.') 
-
-        if not id_cliente or not equipamento or not numero_serie or not itens or not defeito or not valor_orcamento_str:
-            flash('Todos os campos com (*) são obrigatórios.', 'danger')
-            return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
-
-        try:
-            valor_orcamento = float(valor_orcamento_str)
-        except ValueError:
-            flash('O campo "Valor do Orçamento" deve ser um número válido.', 'danger')
-            return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
-
-        codigo_os = f"OS-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-
-        conn = sqlite3.connect(DB)
-        c = conn.cursor()
-        try:
-            # Pega nome e telefone do cliente selecionado
-            c.execute("SELECT nome, telefone FROM clientes WHERE id=?", (id_cliente,))
-            cliente_info = c.fetchone()
-            cliente_nome = cliente_info[0]
-            cliente_telefone = cliente_info[1]
-
-            # Inclui id_cliente na inserção
-            c.execute('''INSERT INTO ordens_servico
-                (codigo_os, id_cliente, cliente, telefone, equipamento, numero_serie, itens_internos, defeito, data_entrada, responsavel, valor_orcamento, pecas_adicionadas, valor_pecas, nome_aprovacao_cliente, data_aprovacao_cliente)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (codigo_os, id_cliente, cliente_nome, cliente_telefone, equipamento, numero_serie, itens, defeito, data_entrada, responsavel, valor_orcamento, '', 0.0, '', ''))
-            conn.commit()
-
-            os_dados = { # Usa cliente_nome e cliente_telefone do DB para PDF
-                'codigo_os': codigo_os,
-                'cliente': cliente_nome, 
-                'telefone': cliente_telefone,
-                'equipamento': equipamento,
-                'numero_serie': numero_serie,
-                'itens_internos': itens,
-                'defeito': defeito,
-                'data_entrada': data_entrada,
-                'responsavel': responsavel,
-                'valor_orcamento': valor_orcamento,
-                'valor_servico_executado': 0.0,
-                'pecas_adicionadas': '',
-                'valor_pecas': 0.0,
-                'nome_aprovacao_cliente': '',
-                'data_aprovacao_cliente': ''
-            }
-            gerar_pdf_os(os_dados)
-            flash(f"OS **{codigo_os}** criada com sucesso! <a href='{url_for('ver_pdf_os', codigo_os=codigo_os)}' class='btn btn-sm btn-primary ms-3' target='_blank'>Visualizar/Imprimir OS</a>", 'success')
-            return redirect(url_for('nova_os'))
-
-        except Exception as e:
-            flash(f'Erro ao criar OS: {e}', 'danger')
-        finally:
-            conn.close()
-    return render_template('nova_os.html', usuario=session['usuario_nome'], clientes_cadastrados=clientes_cadastrados)
-
-@app.route('/listar_os')
-def listar_os():
-    if 'usuario_id' not in session or session['permissao'] == 'cliente':
-        flash('Você não tem permissão para acessar esta página.', 'danger')
-        return redirect(url_for('login'))
-
-    filtro_cliente_nome = request.args.get('cliente', '').strip() # Filtra por nome do cliente
-    filtro_status = request.args.get('status', '').strip()
-
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-
-    query = """
-        SELECT 
-            os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
-            os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
-            os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
-            os.nome_aprovacao_cliente, os.data_aprovacao_cliente
-        FROM ordens_servico os
-        JOIN clientes c ON os.id_cliente = c.id
-    """
-    params = []
-    condicoes = []
-    if filtro_cliente_nome:
-        condicoes.append("c.nome LIKE ?")
-        params.append(f"%{filtro_cliente_nome}%")
-    if filtro_status:
-        condicoes.append("os.status = ?")
-        params.append(filtro_status)
-    if condicoes:
-        query += " WHERE " + " AND ".join(condicoes)
-    query += " ORDER BY os.id DESC"
-
-    c.execute(query, params)
-    ordens = c.fetchall()
-    conn.close()
-    return render_template('listar_os.html', ordens=ordens, usuario=session['usuario_nome'], filtro_cliente=filtro_cliente_nome, filtro_status=filtro_status)
-
-
-@app.route('/editar_os/<int:id>', methods=['GET', 'POST'])
-def editar_os(id):
-    if 'usuario_id' not in session or session['permissao'] == 'cliente':
-        flash('Você não tem permissão para acessar esta página.', 'danger')
-        return redirect(url_for('login'))
-    
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    if request.method == 'POST':
-        solucao = request.form['solucao']
-        status = request.form['status']
-        valor_orcamento_str = request.form['valor_orcamento'].replace(',', '.') 
-        valor_servico_executado_str = request.form.get('valor_servico_executado', '0.0').replace(',', '.')
-        pecas_adicionadas = request.form.get('pecas_adicionadas', '').strip()
-        valor_pecas_str = request.form.get('valor_pecas', '0.0').replace(',', '.')
-        
-        try:
-            valor_orcamento = float(valor_orcamento_str)
-            valor_servico_executado = float(valor_servico_executado_str)
-            valor_pecas = float(valor_pecas_str)
-        except ValueError:
-            flash('Os campos de valor devem ser números válidos.', 'danger')
-            # Re-seleciona a OS para re-renderizar com dados atuais e a mensagem de erro
-            c.execute("""
-                SELECT 
-                    os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
-                    os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
-                    os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
-                    os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
-                FROM ordens_servico os
-                JOIN clientes c ON os.id_cliente = c.id
-                WHERE os.id=?
-            """, (id,))
-            os_info = c.fetchone()
-            conn.close()
-            return render_template('editar_os.html', os=os_info, usuario=session['usuario_nome'])
-
-
-        # Seleciona todos os campos existentes e os novos para atualização
-        # NOTA: nome_aprovacao_cliente e data_aprovacao_cliente NÃO são atualizados aqui,
-        # apenas pela rota de aprovação pública.
-        c.execute("UPDATE ordens_servico SET solucao=?, status=?, valor_orcamento=?, valor_servico_executado=?, pecas_adicionadas=?, valor_pecas=? WHERE id=?", 
-                    (solucao, status, valor_orcamento, valor_servico_executado, pecas_adicionadas, valor_pecas, id))
-        conn.commit()
-        
-        # Re-seleciona a OS para pegar o valor atualizado e gerar o PDF
-        # Ajuste no SELECT para pegar as novas colunas e dados do cliente via JOIN
-        c.execute("""
-            SELECT 
-                os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
-                os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
-                os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
-                os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
-            FROM ordens_servico os
-            JOIN clientes c ON os.id_cliente = c.id
-            WHERE os.id=?
-        """, (id,))
-        os_info = c.fetchone()
-        conn.close()
-
-        if os_info:
-            os_dados_atualizados = {
-                'codigo_os': os_info[1],
-                'cliente': os_info[2], # Nome do cliente do JOIN
-                'telefone': os_info[3], # Telefone do cliente do JOIN
-                'equipamento': os_info[4],
-                'numero_serie': os_info[5],
-                'itens_internos': os_info[6],
-                'defeito': os_info[7],
-                'solucao': os_info[8],
-                'status': os_info[9],
-                'data_entrada': os_info[10],
-                'responsavel': os_info[11],
-                'valor_orcamento': os_info[12],
-                'valor_servico_executado': os_info[13],
-                'pecas_adicionadas': os_info[14],
-                'valor_pecas': os_info[15],
-                'nome_aprovacao_cliente': os_info[16],
-                'data_aprovacao_cliente': os_info[17]
-            }
-            gerar_pdf_os(os_dados_atualizados)
-
-        flash("OS atualizada com sucesso!", 'success')
-        return redirect(url_for('listar_os'))
-    else:
-        # Seleciona todos os campos, incluindo os de peças e aprovação, e dados do cliente
-        c.execute("""
-            SELECT 
-                os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
-                os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
-                os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
-                os.nome_aprovacao_cliente, os.data_aprovacao_cliente, os.id_cliente
-            FROM ordens_servico os
-            JOIN clientes c ON os.id_cliente = c.id
-            WHERE os.id=?
-        """, (id,))
-        os_info = c.fetchone()
-        conn.close()
-        if not os_info:
-            flash("OS não encontrada.", 'danger')
-            return redirect(url_for('listar_os'))
-        return render_template('editar_os.html', os=os_info, usuario=session['usuario_nome'])
-
-
-@app.route('/ver_pdf/<codigo_os>')
-def ver_pdf_os(codigo_os):
-    pdf_path = f"{PDF_DIR}/{codigo_os}.pdf"
-    if os.path.exists(pdf_path):
-        return send_file(pdf_path, as_attachment=False)
-    else:
-        flash("PDF não encontrado.", 'danger')
-        return redirect(url_for('dashboard'))
-
-# --- ROTA PÚBLICA PARA VISUALIZAÇÃO E APROVAÇÃO DA OS PELO CLIENTE (Não logado) ---
-@app.route('/os_cliente/<codigo_os>', methods=['GET', 'POST'])
-def visualizar_os_publica(codigo_os):
-    conn = sqlite3.connect(DB)
-    c = conn.cursor()
-    # Pega todos os dados da OS, incluindo os campos de aprovação e dados do cliente
-    c.execute("""
-        SELECT 
-            os.id, os.codigo_os, c.nome, c.telefone, os.equipamento, os.numero_serie, os.itens_internos, 
-            os.defeito, os.solucao, os.status, os.data_entrada, os.responsavel, os.valor_orcamento,
-            os.valor_servico_executado, os.pecas_adicionadas, os.valor_pecas,
-            os.nome_aprovacao_cliente, os.data_aprovacao_cliente
-        FROM ordens_servico os
-        JOIN clientes c ON os.id_cliente = c.id
-        WHERE os.codigo_os=?
-    """, (codigo_os,))
-    os_info_tuple = c.fetchone()
-
-    if not os_info_tuple:
-        conn.close()
-        return "Ordem de Serviço não encontrada.", 404
-    
-    # Converte a tupla para dicionário para facilitar o acesso no template
-    os_fields = [
-        'id', 'codigo_os', 'cliente', 'telefone', 'equipamento', 'numero_serie',
-        'itens_internos', 'defeito', 'solucao', 'status', 'data_entrada', 'responsavel',
-        'valor_orcamento', 'valor_servico_executado', 'pecas_adicionadas', 'valor_pecas',
-        'nome_aprovacao_cliente', 'data_aprovacao_cliente'
-    ]
-    os_dados = dict(zip(os_fields, os_info_tuple))
-
-    if request.method == 'POST':
-        nome_aprovacao = request.form.get('nome_aprovacao_cliente', '').strip()
-        if not nome_aprovacao:
-            flash('Por favor, digite seu nome para aprovar a Ordem de Serviço.', 'danger')
-            return render_template('visualizar_os_publica.html', os=os_dados)
-        
-        data_aprovacao = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-        try:
-            c.execute("UPDATE ordens_servico SET nome_aprovacao_cliente=?, data_aprovacao_cliente=?, status='Aprovada pelo Cliente' WHERE codigo_os=?", 
-                      (nome_aprovacao, data_aprovacao, codigo_os))
-            conn.commit()
-
-            # Atualiza os_dados para refletir a aprovação imediatamente na tela
-            os_dados['nome_aprovacao_cliente'] = nome_aprovacao
-            os_dados['data_aprovacao_cliente'] = data_aprovacao
-            os_dados['status'] = 'Aprovada pelo Cliente' # Atualiza o status para o PDF
-
-            # Regera o PDF para incluir a informação de aprovação
-            gerar_pdf_os(os_dados)
-
-            flash('Ordem de Serviço aprovada com sucesso!', 'success')
-            
-        except Exception as e:
-            flash(f'Erro ao registrar aprovação: {e}', 'danger')
-        finally:
-            conn.close()
-            # Após o POST, renderiza a mesma página atualizada
-            return render_template('visualizar_os_publica.html', os=os_dados)
-    
-    conn.close()
-    return render_template('visualizar_os_publica.html', os=os_dados)
 
 # Rota para Download do Banco de Dados como Backup
 @app.route('/baixar_backup_db')

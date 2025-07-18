@@ -184,12 +184,12 @@ def gerar_pdf_os(os_dados):
     # --- Conteúdo do Documento (Flowables) ---
 
     # Espaçamento inicial para o conteúdo não colidir com o cabeçalho fixo
-    elements.append(Spacer(1, 3.0*cm)) # Deve ser igual ao topMargin do SimpleDocTemplate
+    elements.append(Spacer(1, 1.0*cm)) # Deve ser igual ao topMargin do SimpleDocTemplate
 
     # Informações da Empresa (movidas para o corpo do documento)
-    elements.append(Paragraph("<b>Sua Empresa de Assistência Técnica</b>", custom_styles['BodyTextBold']))
-    elements.append(Paragraph("Endereço: Rua Principal, 123 - Cidade - Estado", custom_styles['BodyText']))
-    elements.append(Paragraph("Telefone: (XX) XXXX-XXXX | E-mail: contato@empresa.com", custom_styles['BodyText']))
+    elements.append(Paragraph("<b>ZTB Studio</b>", custom_styles['BodyTextBold']))
+    elements.append(Paragraph("Endereço: Rua Joinville, 90 - Recife - PE", custom_styles['BodyText']))
+    elements.append(Paragraph("Telefone: (81) 99696-2824 | E-mail: augusto_pe@hotmail.com", custom_styles['BodyText']))
     elements.append(Spacer(1, 0.8*cm)) # Espaço após as informações da empresa
 
     # Informações Básicas da OS

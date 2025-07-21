@@ -141,21 +141,23 @@ def gerar_pdf_os(os_dados):
     custom_styles.add(ParagraphStyle(name='Title', fontSize=24, spaceAfter=20, alignment=TA_CENTER, fontName='Helvetica-Bold'))
     custom_styles.add(ParagraphStyle(name='Subtitle', fontSize=16, spaceAfter=10, alignment=TA_CENTER, fontName='Helvetica-Bold', textColor=colors.darkblue))
     custom_styles.add(ParagraphStyle(name='Heading1', fontSize=14, spaceBefore=12, spaceAfter=6, fontName='Helvetica-Bold', textColor=colors.darkblue))
-    custom_styles.add(ParagraphStyle(name='BodyText', fontSize=10, spaceAfter=4, fontName='Helvetica'))
-    custom_styles.add(ParagraphStyle(name='BodyTextBold', fontSize=10, spaceAfter=4, fontName='Helvetica-Bold'))
+    # Reduzindo spaceAfter para BodyText e BodyTextBold
+    custom_styles.add(ParagraphStyle(name='BodyText', fontSize=10, spaceAfter=2, fontName='Helvetica'))
+    custom_styles.add(ParagraphStyle(name='BodyTextBold', fontSize=10, spaceAfter=2, fontName='Helvetica-Bold'))
     custom_styles.add(ParagraphStyle(name='SmallText', fontSize=8, spaceAfter=2, fontName='Helvetica'))
     custom_styles.add(ParagraphStyle(name='SignatureLine', fontSize=10, spaceBefore=30, alignment=TA_CENTER, fontName='Helvetica'))
     custom_styles.add(ParagraphStyle(name='SignatureText', fontSize=10, spaceAfter=10, alignment=TA_CENTER, fontName='Helvetica'))
     
     # Estilo para cabeçalhos de seção (agora sem fundo sombreado, apenas bold)
-    custom_styles.add(ParagraphStyle(name='SectionHeader', fontSize=12, spaceBefore=10, spaceAfter=5, fontName='Helvetica-Bold', textColor=colors.black, alignment=TA_LEFT))
+    # Reduzindo spaceAfter para SectionHeader
+    custom_styles.add(ParagraphStyle(name='SectionHeader', fontSize=12, spaceBefore=5, spaceAfter=2, fontName='Helvetica-Bold', textColor=colors.black, alignment=TA_LEFT))
 
 
     # 2. Configurar o SimpleDocTemplate
-    # Aumentar topMargin para acomodar o cabeçalho mais alto
+    # Reduzir topMargin para dar mais espaço para o conteúdo
     doc = SimpleDocTemplate(pdf_file_path, pagesize=A4,
                             rightMargin=cm, leftMargin=cm,
-                            topMargin=4.5*cm, bottomMargin=2.5*cm) 
+                            topMargin=3.5*cm, bottomMargin=2.5*cm) 
 
     elements = []
 
@@ -180,7 +182,7 @@ def gerar_pdf_os(os_dados):
         canvas_obj.drawString(cm, company_info_y_start - 0.8*cm, "Telefone: (81) 99696-2824 | E-mail: augusto_pe@hotmail.com")
 
         # Linha divisória (ajustada para ficar abaixo de todo o cabeçalho)
-        line_y_position = A4[1] - 4.0*cm # Ajuste a posição da linha
+        line_y_position = A4[1] - 3.8*cm # Ajuste a posição da linha para subir
         canvas_obj.line(cm, line_y_position, A4[0] - cm, line_y_position) 
 
         # Footer - Página no canto inferior direito
@@ -193,7 +195,8 @@ def gerar_pdf_os(os_dados):
     # --- Conteúdo do Documento (Flowables) ---
 
     # Espaçamento inicial para o conteúdo não colidir com o cabeçalho fixo
-    elements.append(Spacer(1, 4.0*cm)) # Deve ser igual à margem superior do SimpleDocTemplate
+    # Deve ser igual ao topMargin do SimpleDocTemplate
+    elements.append(Spacer(1, 3.5*cm)) 
 
     # Informações Básicas da OS
     data_os_info = [
@@ -208,17 +211,17 @@ def gerar_pdf_os(os_dados):
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ])
     elements.append(Table(data_os_info, colWidths=[4*cm, None], style=table_style_basic))
-    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Spacer(1, 0.3*cm)) # Reduzido
 
     # Dados do Cliente
     elements.append(Table([[Paragraph("Dados do Cliente", custom_styles['SectionHeader'])]],
                           colWidths=[A4[0]-2*cm],
-                          style=TableStyle([ # Estilo para remover o fundo sombreado
-                              ('BACKGROUND', (0,0), (-1,-1), colors.white), # Fundo branco
+                          style=TableStyle([ 
+                              ('BACKGROUND', (0,0), (-1,-1), colors.white), 
                               ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
                               ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                               ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                              ('LEFTPADDING', (0,0), (-1,-1), 0), # Remover padding para ficar mais compacto
+                              ('LEFTPADDING', (0,0), (-1,-1), 0), 
                               ('RIGHTPADDING', (0,0), (-1,-1), 0),
                               ('TOPPADDING', (0,0), (-1,-1), 0),
                               ('BOTTOMPADDING', (0,0), (-1,-1), 0),
@@ -235,17 +238,17 @@ def gerar_pdf_os(os_dados):
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ])
     elements.append(Table(data_cliente, colWidths=[4*cm, None], style=table_style_cliente))
-    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Spacer(1, 0.3*cm)) # Reduzido
 
     # Dados do Equipamento
     elements.append(Table([[Paragraph("Dados do Equipamento", custom_styles['SectionHeader'])]],
                           colWidths=[A4[0]-2*cm],
-                          style=TableStyle([ # Estilo para remover o fundo sombreado
-                              ('BACKGROUND', (0,0), (-1,-1), colors.white), # Fundo branco
+                          style=TableStyle([ 
+                              ('BACKGROUND', (0,0), (-1,-1), colors.white), 
                               ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
                               ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                               ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                              ('LEFTPADDING', (0,0), (-1,-1), 0), # Remover padding para ficar mais compacto
+                              ('LEFTPADDING', (0,0), (-1,-1), 0), 
                               ('RIGHTPADDING', (0,0), (-1,-1), 0),
                               ('TOPPADDING', (0,0), (-1,-1), 0),
                               ('BOTTOMPADDING', (0,0), (-1,-1), 0),
@@ -262,45 +265,45 @@ def gerar_pdf_os(os_dados):
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ])
     elements.append(Table(data_equipamento, colWidths=[5*cm, None], style=table_style_equipamento))
-    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Spacer(1, 0.3*cm)) # Reduzido
 
     # Itens Internos (agora como Paragraphs simples, sem tabela com grid)
     elements.append(Table([[Paragraph("Itens Internos", custom_styles['SectionHeader'])]],
                           colWidths=[A4[0]-2*cm],
-                          style=TableStyle([ # Estilo para remover o fundo sombreado
-                              ('BACKGROUND', (0,0), (-1,-1), colors.white), # Fundo branco
+                          style=TableStyle([ 
+                              ('BACKGROUND', (0,0), (-1,-1), colors.white), 
                               ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
                               ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                               ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                              ('LEFTPADDING', (0,0), (-1,-1), 0), # Remover padding para ficar mais compacto
+                              ('LEFTPADDING', (0,0), (-1,-1), 0), 
                               ('RIGHTPADDING', (0,0), (-1,-1), 0),
                               ('TOPPADDING', (0,0), (-1,-1), 0),
                               ('BOTTOMPADDING', (0,0), (-1,-1), 0),
                           ])))
     elements.append(Paragraph(os_dados['itens_internos'], custom_styles['BodyText']))
-    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Spacer(1, 0.3*cm)) # Reduzido
 
     # Defeito Relatado (agora como Paragraphs simples, sem tabela com grid)
     elements.append(Table([[Paragraph("Defeito Relatado", custom_styles['SectionHeader'])]],
                           colWidths=[A4[0]-2*cm],
-                          style=TableStyle([ # Estilo para remover o fundo sombreado
-                              ('BACKGROUND', (0,0), (-1,-1), colors.white), # Fundo branco
+                          style=TableStyle([ 
+                              ('BACKGROUND', (0,0), (-1,-1), colors.white), 
                               ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
                               ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                               ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                              ('LEFTPADDING', (0,0), (-1,-1), 0), # Remover padding para ficar mais compacto
+                              ('LEFTPADDING', (0,0), (-1,-1), 0), 
                               ('RIGHTPADDING', (0,0), (-1,-1), 0),
                               ('TOPPADDING', (0,0), (-1,-1), 0),
                               ('BOTTOMPADDING', (0,0), (-1,-1), 0),
                           ])))
     elements.append(Paragraph(os_dados['defeito'], custom_styles['BodyText']))
-    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Spacer(1, 0.3*cm)) # Reduzido
 
     # Detalhes do Serviço (SEMPRE APARECE AGORA)
     elements.append(Table([[Paragraph("Detalhes do Serviço", custom_styles['SectionHeader'])]],
                         colWidths=[A4[0]-2*cm],
                         style=TableStyle([ 
-                            ('BACKGROUND', (0,0), (-1,-1), colors.white), # Fundo branco
+                            ('BACKGROUND', (0,0), (-1,-1), colors.white), 
                             ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
                             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                             ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -325,14 +328,14 @@ def gerar_pdf_os(os_dados):
         ('BOTTOMPADDING', (0,0), (-1,-1), 2),
     ])
     elements.append(Table(data_servico, colWidths=[5*cm, None], style=table_style_servico))
-    elements.append(Spacer(1, 0.5*cm))
+    elements.append(Spacer(1, 0.3*cm)) # Reduzido
 
 
     # Resumo Financeiro - Título "Valores"
     elements.append(Table([[Paragraph("Valores", custom_styles['SectionHeader'])]],
                           colWidths=[A4[0]-2*cm],
                           style=TableStyle([ 
-                              ('BACKGROUND', (0,0), (-1,-1), colors.white), # Fundo branco
+                              ('BACKGROUND', (0,0), (-1,-1), colors.white), 
                               ('TEXTCOLOR', (0,0), (-1,-1), colors.black),
                               ('ALIGN', (0,0), (-1,-1), 'LEFT'),
                               ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
@@ -362,10 +365,10 @@ def gerar_pdf_os(os_dados):
         ('LINEBELOW', (0,-1), (-1,-1), 0.5, colors.black), # Linha abaixo do total
     ])
     elements.append(Table(data_financeiro, colWidths=[6*cm, None], style=table_style_financeiro))
-    elements.append(Spacer(1, 0.8*cm))
+    elements.append(Spacer(1, 0.5*cm)) # Reduzido
 
     # Linhas de Assinatura
-    elements.append(Spacer(1, 2.0*cm)) # Espaço antes da assinatura
+    elements.append(Spacer(1, 1.0*cm)) # Espaço antes da assinatura, reduzido
     elements.append(Paragraph("_______________________________________", custom_styles['SignatureLine']))
     elements.append(Paragraph("Assinatura do Cliente", custom_styles['SignatureText']))
     elements.append(Spacer(1, 0.5*cm))
@@ -600,6 +603,13 @@ def editar_os(id):
 
 @app.route('/ver_pdf/<codigo_os>')
 def ver_pdf_os(codigo_os):
+    # --- INÍCIO DA CORREÇÃO DE SEGURANÇA ---
+    # Verifica se o usuário está logado e tem permissão adequada
+    if 'usuario_id' not in session or session['permissao'] == 'cliente': # Clientes não devem ver PDFs de outras OSs
+        flash('Você não tem permissão para acessar este PDF.', 'danger')
+        return redirect(url_for('login')) # Redireciona para a página de login
+    # --- FIM DA CORREÇÃO DE SEGURANÇA ---
+
     pdf_path = os.path.join(PDF_DIR, f"{codigo_os}.pdf")
     if os.path.exists(pdf_path):
         return send_file(pdf_path, as_attachment=False) # as_attachment=False para visualizar no navegador
@@ -608,6 +618,7 @@ def ver_pdf_os(codigo_os):
         return redirect(url_for('dashboard'))
 
 # --- ROTA PÚBLICA PARA VISUALIZAÇÃO E APROVAÇÃO DA OS PELO CLIENTE (Não logado) ---
+# Esta rota é intencionalmente pública para clientes sem login
 @app.route('/os_cliente/<codigo_os>', methods=['GET', 'POST'])
 def visualizar_os_publica(codigo_os):
     conn = sqlite3.connect(DB)

@@ -157,7 +157,7 @@ def gerar_pdf_os(os_dados):
     # Reduzir topMargin para dar mais espaço para o conteúdo
     doc = SimpleDocTemplate(pdf_file_path, pagesize=A4,
                             rightMargin=cm, leftMargin=cm,
-                            topMargin=3.5*cm, bottomMargin=2.5*cm) 
+                            topMargin=3.5*cm, bottomMargin=2.5*cm) # Ajustado para 3.5cm
 
     elements = []
 
@@ -167,14 +167,14 @@ def gerar_pdf_os(os_dados):
         
         # Header - Título principal "Ordem de Serviço"
         canvas_obj.setFont('Helvetica-Bold', 24)
-        canvas_obj.drawCentredString(A4[0]/2.0, A4[1] - 1.5*cm, "Ordem de Serviço") # Ajustado para centralizar
+        canvas_obj.drawCentredString(A4[0]/2.0, A4[1] - 1.0*cm, "Ordem de Serviço") # Subiu 0.5cm
 
         # Código da OS abaixo do título principal
         canvas_obj.setFont('Helvetica-Bold', 12)
-        canvas_obj.drawCentredString(A4[0]/2.0, A4[1] - 2.2*cm, f"OS: {os_dados['codigo_os']}") # Ajustado para centralizar e menor
+        canvas_obj.drawCentredString(A4[0]/2.0, A4[1] - 1.7*cm, f"OS: {os_dados['codigo_os']}") # Subiu 0.5cm
 
         # Informações da Empresa (movidas de volta para o cabeçalho, abaixo do código da OS)
-        company_info_y_start = A4[1] - 2.8*cm # Posição inicial para info da empresa
+        company_info_y_start = A4[1] - 2.3*cm # Subiu 0.5cm
         canvas_obj.setFont('Helvetica-Bold', 9)
         canvas_obj.drawString(cm, company_info_y_start, "ZTB Studio") # Nome da empresa
         canvas_obj.setFont('Helvetica', 8)
@@ -182,7 +182,7 @@ def gerar_pdf_os(os_dados):
         canvas_obj.drawString(cm, company_info_y_start - 0.8*cm, "Telefone: (81) 99696-2824 | E-mail: augusto_pe@hotmail.com")
 
         # Linha divisória (ajustada para ficar abaixo de todo o cabeçalho)
-        line_y_position = A4[1] - 3.8*cm # Ajuste a posição da linha para subir
+        line_y_position = A4[1] - 3.5*cm # Ajuste a posição da linha para subir, alinhando com topMargin
         canvas_obj.line(cm, line_y_position, A4[0] - cm, line_y_position) 
 
         # Footer - Página no canto inferior direito
@@ -196,7 +196,7 @@ def gerar_pdf_os(os_dados):
 
     # Espaçamento inicial para o conteúdo não colidir com o cabeçalho fixo
     # Deve ser igual ao topMargin do SimpleDocTemplate
-    elements.append(Spacer(1, 3.5*cm)) 
+    elements.append(Spacer(1, 3.5*cm)) # Ajustado para 3.5cm
 
     # Informações Básicas da OS
     data_os_info = [
@@ -365,10 +365,10 @@ def gerar_pdf_os(os_dados):
         ('LINEBELOW', (0,-1), (-1,-1), 0.5, colors.black), # Linha abaixo do total
     ])
     elements.append(Table(data_financeiro, colWidths=[6*cm, None], style=table_style_financeiro))
-    elements.append(Spacer(1, 0.5*cm)) # Reduzido
+    elements.append(Spacer(1, 0.3*cm)) # Reduzido
 
     # Linhas de Assinatura
-    elements.append(Spacer(1, 1.0*cm)) # Espaço antes da assinatura, reduzido
+    elements.append(Spacer(1, 0.8*cm)) # Espaço antes da assinatura, reduzido para subir
     elements.append(Paragraph("_______________________________________", custom_styles['SignatureLine']))
     elements.append(Paragraph("Assinatura do Cliente", custom_styles['SignatureText']))
     elements.append(Spacer(1, 0.5*cm))
